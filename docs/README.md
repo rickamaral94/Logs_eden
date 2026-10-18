@@ -17,6 +17,7 @@ This contains documentation created by developers, build instructions, guideline
 - **[Platform-Specific Caveats](./Caveats.md)**
 - **[The NVIDIA SM86 (Maxwell) GPU](./NvidiaGpu.md)**
 - **[Driver Bugs](./DriverBugs.md)**
+- **[Android Diagnostic Captures](./Diagnostics.md)**
 - **[Building Older Commits](./build/OlderCommits.md)**
 - Subsystems:
   - **[Design Overview](./DesignOverview.md)**

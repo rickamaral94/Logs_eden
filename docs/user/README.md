@@ -46,6 +46,7 @@ A copy of this handbook is [available online](https://git.eden-emu.dev/eden-emu/
 - **[Custom Firmware](./CFW.md)**
 - **[Alter Date & Time](./AlterDateTime.md)**
 - **[How To Access Logs](./HowToAccessLogs.md)**
+- **[Diagnostic Captures (Android)](./DiagnosticCaptures.md)**
 - **[Gyro Controls](./GyroControls.md)**
 - **[Platforms and Architectures](./Architectures.md)**
 - **[Native Application Development](./Native.md)**
