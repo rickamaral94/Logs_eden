@@ -114,6 +114,7 @@ void WriteCriticalMarker(std::string_view reason);
 [[nodiscard]] std::string_view TimerName(Timer timer) noexcept;
 [[nodiscard]] std::string_view CounterName(Counter counter) noexcept;
 [[nodiscard]] std::string_view FrameSeriesName(FrameSeries series) noexcept;
+[[nodiscard]] std::string_view StageName(Stage stage) noexcept;
 
 /// Milliseconds on the monotonic clock (CLOCK_MONOTONIC on Android, same base as
 /// System.nanoTime() on the Java side).

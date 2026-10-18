@@ -14,6 +14,7 @@ add_library(yuzu-android SHARED
     android_settings.cpp
     game_metadata.cpp
     native_log.cpp
+    native_diagnostics.cpp
     android_config.cpp
     android_config.h
     native_input.cpp

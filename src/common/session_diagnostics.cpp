@@ -166,22 +166,6 @@ std::string_view SeverityName(Severity severity) {
     return "unknown";
 }
 
-std::string_view StageName(Stage stage) {
-    switch (stage) {
-    case Stage::Unknown:
-        return "unknown";
-    case Stage::RendererInit:
-        return "renderer_init";
-    case Stage::ShaderCacheLoad:
-        return "shader_cache_load";
-    case Stage::Running:
-        return "running";
-    case Stage::Shutdown:
-        return "shutdown";
-    }
-    return "unknown";
-}
-
 // Nearest-rank percentile on a sorted vector.
 u32 Percentile(const std::vector<u32>& sorted, double p) {
     if (sorted.empty()) {
@@ -384,6 +368,21 @@ std::string_view FrameSeriesName(FrameSeries series) noexcept {
     return SERIES_NAMES[static_cast<size_t>(series)];
 }
 
+std::string_view StageName(Stage stage) noexcept {
+    switch (stage) {
+    case Stage::Unknown:
+        return "unknown";
+    case Stage::RendererInit:
+        return "renderer_init";
+    case Stage::ShaderCacheLoad:
+        return "shader_cache_load";
+    case Stage::Running:
+        return "running";
+    case Stage::Shutdown:
+        return "shutdown";
+    }
+    return "unknown";
+}
 bool StartCapture(std::string session_dir) {
     auto& state = GetState();
     std::scoped_lock lock{state.capture_mutex};
