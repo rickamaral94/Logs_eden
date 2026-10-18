@@ -409,6 +409,10 @@ void Start() {
 }
 
 void Stop() {
+    Flush();
+}
+
+void Flush() {
     if (logging_instance)
         logging_instance->ForEachBackend([](Backend& backend) { backend.Flush(); });
 }

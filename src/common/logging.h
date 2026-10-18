@@ -136,6 +136,9 @@ void Start();
 /// Explicitly stops the logger thread and flushes the buffers
 void Stop();
 
+/// Writes buffered log entries to their backends, e.g. before the log file is copied
+void Flush();
+
 /// The global filter will prevent any messages from even being processed if they are filtered.
 void SetGlobalFilter(const Filter& filter);
 void SetColorConsoleBackendEnabled(bool enabled);

@@ -215,6 +215,10 @@ class AndroidMetricsSampler(
         val gpuBusy = runCatching { ProcParsers.parseKgslBusyPercent(File(KGSL_BUSY).readText()) }
             .getOrNull()
         val gpuClock = readLong(KGSL_CLOCK)?.div(1_000_000L)
+        // The governor's current limits tell a capped clock apart from a low requested one.
+        val gpuMaxClock = readLong(KGSL_MAX_CLOCK)?.div(1_000_000L)
+        val gpuMinClock = readLong(KGSL_MIN_CLOCK)?.div(1_000_000L)
+        availability.record("gpu_clock_limits", gpuMaxClock, "kgsl max_gpuclk not readable")
         availability.record("gpu_busy", gpuBusy, "kgsl gpubusy not readable")
         return buildJsonObject {
             put("mem_available_kb", memoryInfo.availMem / 1024)
@@ -227,6 +231,8 @@ class AndroidMetricsSampler(
             put("cpu_freq_mhz", JsonArray(cpuFreq.map { it?.let(::JsonPrimitive) ?: JsonNull }))
             put("gpu_busy_pct_kgsl", gpuBusy)
             put("gpu_clock_mhz_kgsl", gpuClock)
+            put("gpu_max_clock_mhz_kgsl", gpuMaxClock)
+            put("gpu_min_clock_mhz_kgsl", gpuMinClock)
         }
     }
 
@@ -270,6 +276,8 @@ class AndroidMetricsSampler(
         private const val PSS_SAMPLE_EVERY = 10L
         private const val KGSL_BUSY = "/sys/class/kgsl/kgsl-3d0/gpubusy"
         private const val KGSL_CLOCK = "/sys/class/kgsl/kgsl-3d0/gpuclk"
+        private const val KGSL_MAX_CLOCK = "/sys/class/kgsl/kgsl-3d0/max_gpuclk"
+        private const val KGSL_MIN_CLOCK = "/sys/class/kgsl/kgsl-3d0/devfreq/min_freq"
         private val GC_STATS = listOf(
             "art.gc.gc-count",
             "art.gc.gc-time",
@@ -362,6 +370,27 @@ class AndroidMetricsSampler(
                 "system",
                 "/sys/class/kgsl/kgsl-3d0/gpubusy",
                 "Adreno kernel driver, all processes"
+            )
+            def(
+                "system.gpu_clock_mhz_kgsl",
+                "MHz",
+                "system",
+                "/sys/class/kgsl/kgsl-3d0/gpuclk",
+                "current Adreno core clock at sample time"
+            )
+            def(
+                "system.gpu_max_clock_mhz_kgsl",
+                "MHz",
+                "system",
+                "/sys/class/kgsl/kgsl-3d0/max_gpuclk",
+                "current upper limit; lowered by thermal, power HAL or vendor performance modes"
+            )
+            def(
+                "system.gpu_min_clock_mhz_kgsl",
+                "MHz",
+                "system",
+                "/sys/class/kgsl/kgsl-3d0/devfreq/min_freq",
+                "current lower limit of the GPU governor"
             )
             def(
                 "emulator.shaders_building",

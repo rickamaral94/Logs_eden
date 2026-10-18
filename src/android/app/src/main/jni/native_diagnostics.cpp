@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/android/android_common.h"
+#include "common/logging.h"
 #include "common/scm_rev.h"
 #include "common/session_diagnostics.h"
 #include "common/settings.h"
@@ -134,6 +135,10 @@ jboolean Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_startCapture(JNIE
 
 void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_stopCapture(JNIEnv* env, jobject obj) {
     Diag::StopCapture();
+}
+
+void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_flushLog(JNIEnv* env, jobject obj) {
+    Common::Log::Flush();
 }
 
 jboolean Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_isCapturing(JNIEnv* env,

@@ -37,6 +37,8 @@ object DiagnosticsExporter {
 
     fun inputs(context: Context, session: SessionInfo?, game: Game? = null): ExportInputs {
         val logDir = File(DirectoryInitialization.userDirectory!!, "log")
+        // The log file is written through a buffer; without a flush the newest lines are missing.
+        runCatching { NativeDiagnostics.flushLog() }
         val snapshot = if (session == null) {
             buildJsonObject {
                 put("collected_at_utc", DiagnosticsSession.utcNow())

@@ -19,4 +19,7 @@ object NativeDiagnostics {
     external fun staticInfo(): String
 
     external fun recordMarker(markerId: Long, category: String)
+
+    /** Writes buffered Eden log lines to eden_log.txt so an export includes the latest ones. */
+    external fun flushLog()
 }

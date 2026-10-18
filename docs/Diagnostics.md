@@ -147,7 +147,10 @@ Top-level fields of `report.json`:
   come from a 0.25 ms histogram (`percentile_resolution_ms`). `over_33ms`, `over_50ms`,
   `over_100ms`, `over_2x_median` count slow frames.
 - Android metrics declare `scope`: `process` (Eden only) or `system` (whole device, e.g. memory
-  pressure, thermal state, CPU frequency, Adreno `kgsl` busy percentage).
+  pressure, thermal state, CPU frequency, Adreno `kgsl` busy percentage and clock).
+  `gpu_max_clock_mhz_kgsl` and `gpu_min_clock_mhz_kgsl` are the governor's current limits, so a
+  clock held low by a lowered upper limit (thermal, power HAL, vendor performance modes) can be
+  told apart from a low clock the governor chose.
 - `process.memory.native_heap_allocated_kb` is the malloc heap only. Driver allocations that are
   mapped outside malloc are not included. GPU memory is only reported through
   `VK_EXT_memory_budget`, as the driver states it.
@@ -214,3 +217,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | 1 | Initial format |
 | 1 (additive) | `hitches`; `sampler_cost_breakdown_ms` per sample; `level_name` on `trim_memory` events; `slow_graphics_pipeline_create` / `slow_compute_pipeline_create` native events (driver creation ≥ 250 ms, with the shader or pipeline hash); `availability` now also records `available`, so mixed results read `intermittent` |
 | 1 (additive) | `pacing` buckets (`lt_12ms`, `12_20ms`, `20_28ms`, `28_38ms`, `38_55ms`, `ge_55ms`) per window and per session frame series; `long_frame` native events (interval ≥ 100 ms, at most 100 per capture) with the exact time of each long frame |
+| 1 (additive) | `system.gpu_max_clock_mhz_kgsl`, `system.gpu_min_clock_mhz_kgsl` per sample; `gpu_busy_pct_kgsl`, `gpu_clock_mhz_kgsl` and `gpu_max_clock_mhz_kgsl` statistics in `android_summary`; `gpu_clock_mhz_kgsl` in `hitches`. The Eden log is flushed before export, so the bundled log now includes its newest lines |

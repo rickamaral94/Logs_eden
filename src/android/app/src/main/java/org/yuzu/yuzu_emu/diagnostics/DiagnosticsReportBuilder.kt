@@ -304,6 +304,11 @@ class DiagnosticsReportBuilder(
             )
             put("battery_temp_c_max", system.mapNotNull { it.num("battery_temp_c") }.maxOrNull())
             put("gpu_busy_pct_kgsl", stats(system.mapNotNull { it.num("gpu_busy_pct_kgsl") }))
+            put("gpu_clock_mhz_kgsl", stats(system.mapNotNull { it.num("gpu_clock_mhz_kgsl") }))
+            put(
+                "gpu_max_clock_mhz_kgsl",
+                stats(system.mapNotNull { it.num("gpu_max_clock_mhz_kgsl") })
+            )
             put("sampler_cost_ms", stats(android.mapNotNull { it.num("sampler_cost_ms") }))
         }
     }
@@ -354,6 +359,10 @@ class DiagnosticsReportBuilder(
                 put(
                     "gpu_busy_pct_kgsl",
                     android?.get("system")?.asObject().num("gpu_busy_pct_kgsl")
+                )
+                put(
+                    "gpu_clock_mhz_kgsl",
+                    android?.get("system")?.asObject().num("gpu_clock_mhz_kgsl")
                 )
                 put(
                     "native_events",
@@ -569,6 +578,9 @@ class DiagnosticsReportBuilder(
         val android = report["android_summary"]?.asObject()
         val cpu = android?.get("process_cpu_pct_of_one_core")?.asObject()
         val samplerCost = android?.get("sampler_cost_ms")?.asObject()
+        val gpuBusy = android?.get("gpu_busy_pct_kgsl")?.asObject()
+        val gpuClock = android?.get("gpu_clock_mhz_kgsl")?.asObject()
+        val gpuMaxClock = android?.get("gpu_max_clock_mhz_kgsl")?.asObject()
         val duration = session.num("duration_ms")?.let { fmt(it / 1000.0) + " s" } ?: "?"
         val deviceName = identity?.let { "${it.str("manufacturer")} ${it.str("model")}" }
             ?: "identity removed"
@@ -685,6 +697,18 @@ class DiagnosticsReportBuilder(
             )
             appendLine("Max thermal status: ${android.num0("thermal_status_max")}")
             appendLine("Max battery temperature: ${android.num1("battery_temp_c_max")} °C")
+            appendLine(
+                "GPU busy % (kgsl, all processes) avg/max: ${gpuBusy.num1("avg")} / " +
+                    gpuBusy.num1("max")
+            )
+            appendLine(
+                "GPU clock MHz avg/min/max: ${gpuClock.num0("avg")} / ${gpuClock.num0("min")} / " +
+                    gpuClock.num0("max")
+            )
+            appendLine(
+                "GPU clock upper limit MHz min/max: ${gpuMaxClock.num0("min")} / " +
+                    gpuMaxClock.num0("max")
+            )
             appendLine(
                 "Sampler cost avg/max ms: ${samplerCost.num1("avg")} / ${samplerCost.num1("max")}"
             )
