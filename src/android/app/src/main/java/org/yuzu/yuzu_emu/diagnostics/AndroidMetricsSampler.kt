@@ -63,11 +63,19 @@ class AndroidMetricsSampler(
         previousCpuMs = nowCpuMs
         previousWallMs = nowWallMs
 
-        val threads = sampleThreads(wallDelta, availability)
-        val memory = sampleProcessMemory(availability)
-        val gc = sampleGc(availability)
-        val system = sampleSystem(availability)
-        val perf = samplePerf(availability)
+        // Per-part cost, so the sampler itself can be measured before it is optimized.
+        val costs = linkedMapOf<String, Double>()
+        fun <T> timed(name: String, block: () -> T): T {
+            val partStart = SystemClock.elapsedRealtimeNanos()
+            return block().also {
+                costs[name] = (SystemClock.elapsedRealtimeNanos() - partStart) / 1_000_000.0
+            }
+        }
+        val threads = timed("threads") { sampleThreads(wallDelta, availability) }
+        val memory = timed("memory") { sampleProcessMemory(availability) }
+        val gc = timed("gc") { sampleGc(availability) }
+        val system = timed("system") { sampleSystem(availability) }
+        val perf = timed("emulator") { samplePerf(availability) }
 
         sampleCount++
         val costMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
@@ -87,6 +95,18 @@ class AndroidMetricsSampler(
             put("emulator", perf)
             put("availability", JsonObject(availability.mapValues { JsonPrimitive(it.value) }))
             put("sampler_cost_ms", costMs)
+            put(
+                "sampler_cost_breakdown_ms",
+                JsonObject(costs.mapValues { JsonPrimitive(it.value) })
+            )
+        }
+    }
+
+    private fun MutableMap<String, String>.record(key: String, value: Any?, reason: String) {
+        this[key] = if (value != null) {
+            DiagnosticsSchema.AVAILABLE
+        } else {
+            "${DiagnosticsSchema.UNAVAILABLE}: $reason"
         }
     }
 
@@ -134,9 +154,7 @@ class AndroidMetricsSampler(
     private fun sampleProcessMemory(availability: MutableMap<String, String>): JsonObject {
         val status = runCatching { ProcParsers.parseStatusKb(File("/proc/self/status").readText()) }
             .getOrNull()
-        if (status == null) {
-            availability["memory.rss"] = "${DiagnosticsSchema.UNAVAILABLE}: /proc/self/status"
-        }
+        availability.record("memory.rss", status?.get("VmRSS"), "/proc/self/status")
         val runtime = Runtime.getRuntime()
         // Debug.getPss walks smaps and is comparatively expensive for a large process, so it is
         // only sampled at a lower rate and only at the detailed level.
@@ -147,6 +165,8 @@ class AndroidMetricsSampler(
         }
         if (!detailed) {
             availability["memory.pss"] = "${DiagnosticsSchema.UNAVAILABLE}: detailed level only"
+        } else if (sampleCount % PSS_SAMPLE_EVERY == 0L) {
+            availability.record("memory.pss", pssKb, "Debug.getPss")
         }
         return buildJsonObject {
             put("rss_kb", status?.get("VmRSS"))
@@ -165,9 +185,7 @@ class AndroidMetricsSampler(
 
     private fun sampleGc(availability: MutableMap<String, String>): JsonObject {
         val current = readGcStats()
-        if (current.isEmpty()) {
-            availability["gc"] = "${DiagnosticsSchema.UNAVAILABLE}: Debug.getRuntimeStat"
-        }
+        availability.record("gc", current.takeIf { it.isNotEmpty() }, "Debug.getRuntimeStat")
         val deltas = current.mapValues { (key, value) -> value - (previousGc[key] ?: value) }
         previousGc = current
         return buildJsonObject {
@@ -183,27 +201,21 @@ class AndroidMetricsSampler(
         val thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             powerManager.currentThermalStatus
         } else {
-            availability["thermal_status"] = "${DiagnosticsSchema.UNAVAILABLE}: API < 29"
             null
         }
+        availability.record("thermal_status", thermalStatus, "API < 29")
         val headroom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             powerManager.getThermalHeadroom(0).takeUnless { it.isNaN() }
         } else {
             null
         }
-        if (headroom == null) {
-            availability["thermal_headroom"] = "${DiagnosticsSchema.UNAVAILABLE}: not reported"
-        }
+        availability.record("thermal_headroom", headroom, "not reported")
         val cpuFreq = readCpuFrequenciesMhz()
-        if (cpuFreq.all { it == null }) {
-            availability["cpu_freq"] = "${DiagnosticsSchema.UNAVAILABLE}: cpufreq not readable"
-        }
+        availability.record("cpu_freq", cpuFreq.firstOrNull { it != null }, "cpufreq not readable")
         val gpuBusy = runCatching { ProcParsers.parseKgslBusyPercent(File(KGSL_BUSY).readText()) }
             .getOrNull()
         val gpuClock = readLong(KGSL_CLOCK)?.div(1_000_000L)
-        if (gpuBusy == null) {
-            availability["gpu_busy"] = "${DiagnosticsSchema.UNAVAILABLE}: kgsl gpubusy not readable"
-        }
+        availability.record("gpu_busy", gpuBusy, "kgsl gpubusy not readable")
         return buildJsonObject {
             put("mem_available_kb", memoryInfo.availMem / 1024)
             put("mem_total_kb", memoryInfo.totalMem / 1024)
@@ -222,9 +234,7 @@ class AndroidMetricsSampler(
     // so frame rates are derived from the native frame interval data instead.
     private fun samplePerf(availability: MutableMap<String, String>): JsonObject {
         val shaders = runCatching { NativeLibrary.getShadersBuilding() }.getOrNull()
-        if (shaders == null) {
-            availability["emulator.shaders_building"] = DiagnosticsSchema.UNAVAILABLE
-        }
+        availability.record("emulator.shaders_building", shaders, "JNI call failed")
         return buildJsonObject {
             put("shaders_building", shaders)
         }
@@ -405,6 +415,13 @@ class AndroidMetricsSampler(
                 "process",
                 "SystemClock",
                 "time spent collecting the Android metrics of this sample"
+            )
+            def(
+                "sampler_cost_breakdown_ms",
+                "ms",
+                "process",
+                "SystemClock",
+                "the same cost split by part: threads, memory, gc, system, emulator"
             )
         }
     }

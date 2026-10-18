@@ -115,6 +115,7 @@ Top-level fields of `report.json`:
 | `android_summary` | Aggregates of Android samples (avg/min/max), GC totals, sampler cost |
 | `frame_rate` | Guest present, host present and game FPS averaged over the capture |
 | `markers` | User markers with `context` built from samples within -10 s / +5 s |
+| `hitches` | Up to 10 sample windows whose longest guest frame interval exceeds 100 ms, with the timers, counters, shader queue, CPU/GPU load and native events of the same window (correlation only) |
 | `events.native` | Native event ring (Vulkan check failures, device loss, pipeline/shader failures, init failures) |
 | `events.android` | Capture lifecycle, `trim_memory`, `low_memory`, `thermal_status_changed` |
 | `exit_reasons` | Last 5 `ApplicationExitInfo` entries (API 30+) |
@@ -134,7 +135,8 @@ Top-level fields of `report.json`:
   - `graphics_shader_translate`, `compute_shader_translate`: runtime cache misses, guest shader
     translation plus module creation on the emulated GPU thread.
   - `graphics_pipeline_create`, `compute_pipeline_create`: driver pipeline creation on worker
-    threads.
+    threads. Creations of 250 ms or more are also recorded as events with the hash, so the
+    shader can be identified and dumped.
 - `counters` are event counts per window (samples) or per capture (summary):
   `graphics_pipeline_cache_miss`, `compute_pipeline_cache_miss`,
   `draw_skipped_pipeline_pending` (asynchronous shaders skipped a draw), `pipeline_create_failed`,
@@ -210,3 +212,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | Version | Change |
 | --- | --- |
 | 1 | Initial format |
+| 1 (additive) | `hitches`; `sampler_cost_breakdown_ms` per sample; `level_name` on `trim_memory` events; `slow_graphics_pipeline_create` / `slow_compute_pipeline_create` native events (driver creation ≥ 250 ms, with the shader or pipeline hash); `availability` now also records `available`, so mixed results read `intermittent` |

@@ -107,6 +107,7 @@ class DiagnosticsReportBuilder(
             put("native_summary", nativeSummary)
             put("android_summary", androidSummary(samples))
             put("frame_rate", frameRate(samples))
+            put("hitches", hitches(samples))
             put(
                 "markers",
                 buildJsonArray { markers.forEach { add(markerWithContext(it, samples)) } }
@@ -304,6 +305,79 @@ class DiagnosticsReportBuilder(
             put("battery_temp_c_max", system.mapNotNull { it.num("battery_temp_c") }.maxOrNull())
             put("gpu_busy_pct_kgsl", stats(system.mapNotNull { it.num("gpu_busy_pct_kgsl") }))
             put("sampler_cost_ms", stats(android.mapNotNull { it.num("sampler_cost_ms") }))
+        }
+    }
+
+    /**
+     * Sample windows with the longest guest frame intervals and what was measured in the same
+     * window. Correlation only: a window can contain several unrelated events.
+     */
+    private fun hitches(samples: List<JsonObject>): JsonObject {
+        val windows = samples.mapNotNull { sample ->
+            val native = sample["native"]?.asObject() ?: return@mapNotNull null
+            val guest = native["frames"]?.asObject()?.get("guest_present_interval")?.asObject()
+            val maxMs = guest.num("max_ms") ?: return@mapNotNull null
+            if (maxMs < HITCH_THRESHOLD_MS) {
+                return@mapNotNull null
+            }
+            val timers = native["timers"]?.asObject()
+            val counters = native["counters"]?.asObject()
+            val window = native.num("window_ms") ?: 0.0
+            fun timerMaxMs(name: String) = timers?.get(name)?.asObject().num("max_us")?.div(1000.0)
+            val android = sample["android"]?.asObject()
+            maxMs to buildJsonObject {
+                put("t_s", (sample.num("t_ms") ?: 0.0) / 1000.0)
+                put("window_ms", window)
+                put("stage", native["stage"] ?: JsonNull)
+                put("guest_frame_interval_max_ms", maxMs)
+                put("guest_frames_over_50ms", guest.num("over_50ms"))
+                put(
+                    "game_fps",
+                    counters.num("game_frames")?.takeIf { window > 0 }?.times(1000.0)?.div(window)
+                )
+                put("pipeline_build_wait_max_ms", timerMaxMs("pipeline_build_wait"))
+                put("fence_wait_max_ms", timerMaxMs("fence_wait"))
+                put("queue_submit_max_ms", timerMaxMs("queue_submit"))
+                put("graphics_pipeline_create_max_ms", timerMaxMs("graphics_pipeline_create"))
+                put("compute_pipeline_create_max_ms", timerMaxMs("compute_pipeline_create"))
+                put("graphics_pipeline_cache_miss", counters.num("graphics_pipeline_cache_miss"))
+                put("compute_pipeline_cache_miss", counters.num("compute_pipeline_cache_miss"))
+                put("draw_skipped_pipeline_pending", counters.num("draw_skipped_pipeline_pending"))
+                put(
+                    "shaders_building",
+                    android?.get("emulator")?.asObject().num("shaders_building")
+                )
+                put(
+                    "process_cpu_pct_of_one_core",
+                    android?.get("process")?.asObject().num("cpu_pct_of_one_core")
+                )
+                put(
+                    "gpu_busy_pct_kgsl",
+                    android?.get("system")?.asObject().num("gpu_busy_pct_kgsl")
+                )
+                put(
+                    "native_events",
+                    JsonArray(
+                        (native["events"] as? JsonArray).orEmpty().mapNotNull { event ->
+                            val e = event.asObject() ?: return@mapNotNull null
+                            buildJsonObject {
+                                put("name", e["name"] ?: JsonNull)
+                                put("severity", e["severity"] ?: JsonNull)
+                                put("fields", e["fields"] ?: JsonNull)
+                            }
+                        }
+                    )
+                )
+            }
+        }
+        val top = windows.sortedByDescending { it.first }.take(MAX_HITCHES)
+            .map { it.second }
+            .sortedBy { it.num("t_s") ?: 0.0 }
+        return buildJsonObject {
+            put("threshold_ms", HITCH_THRESHOLD_MS)
+            put("windows_over_threshold", windows.size)
+            put("windows", JsonArray(top))
+            put("note", "longest windows by guest frame interval; metrics of the same window")
         }
     }
 
@@ -572,16 +646,46 @@ class DiagnosticsReportBuilder(
                 )
             }
             appendLine()
-            appendLine("== Process / system ==")
-            appendLine("Process CPU (% of one core) avg/max: ${cpu.str("avg")} / ${cpu.str("max")}")
-            appendLine("RSS peak (VmHWM): ${android.str("rss_peak_kb_max")} KiB")
+            val hitchList = report["hitches"]?.asObject()
             appendLine(
-                "Min available system memory: ${android.str("system_mem_available_kb_min")} KiB"
+                "== Longest frame intervals (over $HITCH_THRESHOLD_MS ms, " +
+                    "${hitchList.str("windows_over_threshold")} sample windows) =="
             )
-            appendLine("Max thermal status: ${android.str("thermal_status_max")}")
-            appendLine("Max battery temperature: ${android.str("battery_temp_c_max")} °C")
+            (hitchList?.get("windows") as? JsonArray)?.forEach { h ->
+                val hitch = h.asObject() ?: return@forEach
+                appendLine(
+                    "t=${hitch.num1("t_s")} s  frame max " +
+                        "${hitch.num1("guest_frame_interval_max_ms")} ms"
+                )
+                appendLine(
+                    "    max ms: build wait ${hitch.num1("pipeline_build_wait_max_ms")}, " +
+                        "fence wait ${hitch.num1("fence_wait_max_ms")}, " +
+                        "graphics create ${hitch.num1("graphics_pipeline_create_max_ms")}, " +
+                        "compute create ${hitch.num1("compute_pipeline_create_max_ms")}"
+                )
+                appendLine(
+                    "    misses graphics/compute ${hitch.num0("graphics_pipeline_cache_miss")}/" +
+                        "${hitch.num0("compute_pipeline_cache_miss")}, " +
+                        "shaders building ${hitch.num0("shaders_building")}"
+                )
+                (hitch["native_events"] as? JsonArray)?.forEach { e ->
+                    val event = e.asObject() ?: return@forEach
+                    appendLine("    event ${event.str("name")} ${event["fields"] ?: ""}")
+                }
+            }
+            appendLine()
+            appendLine("== Process / system ==")
             appendLine(
-                "Sampler cost avg/max ms: ${samplerCost.str("avg")} / ${samplerCost.str("max")}"
+                "Process CPU (% of one core) avg/max: ${cpu.num1("avg")} / ${cpu.num1("max")}"
+            )
+            appendLine("RSS peak (VmHWM): ${android.mib("rss_peak_kb_max")} MiB")
+            appendLine(
+                "Min available system memory: ${android.mib("system_mem_available_kb_min")} MiB"
+            )
+            appendLine("Max thermal status: ${android.num0("thermal_status_max")}")
+            appendLine("Max battery temperature: ${android.num1("battery_temp_c_max")} °C")
+            appendLine(
+                "Sampler cost avg/max ms: ${samplerCost.num1("avg")} / ${samplerCost.num1("max")}"
             )
             appendLine()
             appendLine("== Markers ==")
@@ -643,6 +747,8 @@ class DiagnosticsReportBuilder(
         const val MAX_DUMPS = 3
         const val MARKER_BEFORE_MS = 10_000L
         const val MARKER_AFTER_MS = 5_000L
+        const val HITCH_THRESHOLD_MS = 100L
+        const val MAX_HITCHES = 10
         private val SUMMARY_TIMERS = listOf(
             "pipeline_build_wait",
             "fence_wait",
@@ -721,6 +827,15 @@ internal fun JsonElement.num(): Double? = (this as? JsonPrimitive)?.let {
 }
 
 internal fun JsonObject?.num(key: String): Double? = this?.get(key)?.num()
+
+internal fun JsonObject?.num1(key: String): String =
+    num(key)?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "n/a"
+
+internal fun JsonObject?.num0(key: String): String =
+    num(key)?.let { String.format(Locale.ROOT, "%.0f", it) } ?: "n/a"
+
+internal fun JsonObject?.mib(key: String): String =
+    num(key)?.let { String.format(Locale.ROOT, "%.0f", it / 1024.0) } ?: "n/a"
 
 internal fun JsonObject?.str(key: String): String {
     val value = this?.get(key) ?: return "?"

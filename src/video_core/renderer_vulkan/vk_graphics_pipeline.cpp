@@ -314,9 +314,18 @@ GraphicsPipeline::GraphicsPipeline(
         const VkRenderPass render_pass{render_pass_cache.Get(MakeRenderPassKey(key.state, device))};
         Validate();
         try {
-            Common::Diagnostics::ScopedTimer timer{
-                Common::Diagnostics::Timer::GraphicsPipelineCreate};
+            namespace Diag = Common::Diagnostics;
+            const auto create_start = std::chrono::steady_clock::now();
             MakePipeline(render_pass);
+            const auto elapsed = std::chrono::steady_clock::now() - create_start;
+            Diag::AddTiming(Diag::Timer::GraphicsPipelineCreate, elapsed);
+            if (elapsed >= Diag::SlowPipelineThreshold) {
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+                Diag::RecordEvent(Diag::Severity::Warning, "pipeline",
+                                  "slow_graphics_pipeline_create",
+                                  {{"pipeline_hash", fmt::format("{:016x}", key.Hash())},
+                                   {"ms", std::to_string(ms.count())}});
+            }
         } catch (const vk::Exception& exception) {
             LOG_CRITICAL(Render_Vulkan, "Graphics pipeline build failed: {}", exception.what());
             Common::Diagnostics::Increment(Common::Diagnostics::Counter::PipelineCreateFailed);

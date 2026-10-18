@@ -411,6 +411,7 @@ object DiagnosticsSession {
                         buildJsonObject {
                             put("type", "trim_memory")
                             put("level", level)
+                            put("level_name", trimMemoryLevelName(level))
                         }
                     )
                 }
@@ -442,6 +443,18 @@ object DiagnosticsSession {
             runCatching { powerManager.addThermalStatusListener(executor, listener) }
                 .onSuccess { thermalListener = listener }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun trimMemoryLevelName(level: Int): String = when (level) {
+        ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE -> "running_moderate"
+        ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> "running_low"
+        ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> "running_critical"
+        ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> "ui_hidden"
+        ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> "background"
+        ComponentCallbacks2.TRIM_MEMORY_MODERATE -> "moderate"
+        ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> "complete"
+        else -> "unknown"
     }
 
     private fun unregisterSystemCallbacks(context: Context) {

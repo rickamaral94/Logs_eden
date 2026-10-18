@@ -50,6 +50,20 @@ class DiagnosticsRedactorTest {
     }
 
     @Test
+    fun userChosenSettingValuesAreRemovedFromLogs() {
+        val redactor = DiagnosticsRedactor()
+        val text = redactor.redactText(
+            "LogSettings: -- WebService.eden_username: Ricardo Silva\n" +
+                "LogSettings: -- System.device_name: Meu Odin\n" +
+                "LogSettings: -- Renderer.use_vsync: 1"
+        )
+        assertFalse(text.contains("Ricardo"))
+        assertFalse(text.contains("Meu Odin"))
+        assertTrue(text.contains("eden_username: <redacted>"))
+        assertTrue(text.contains("use_vsync: 1"))
+    }
+
+    @Test
     fun networkAddressesAreRemovedFromText() {
         val redactor = DiagnosticsRedactor()
         val text = redactor.redactText("room 192.168.1.20:24872 mac 01:23:45:67:89:AB")

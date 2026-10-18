@@ -112,9 +112,18 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
             .basePipelineIndex = 0,
         };
         try {
-            Common::Diagnostics::ScopedTimer timer{
-                Common::Diagnostics::Timer::ComputePipelineCreate};
+            namespace Diag = Common::Diagnostics;
+            const auto create_start = std::chrono::steady_clock::now();
             pipeline = device.GetLogical().CreateComputePipeline(compute_ci, *pipeline_cache);
+            const auto elapsed = std::chrono::steady_clock::now() - create_start;
+            Diag::AddTiming(Diag::Timer::ComputePipelineCreate, elapsed);
+            if (elapsed >= Diag::SlowPipelineThreshold) {
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+                Diag::RecordEvent(Diag::Severity::Warning, "pipeline",
+                                  "slow_compute_pipeline_create",
+                                  {{"shader_hash", fmt::format("{:016x}", shader_hash)},
+                                   {"ms", std::to_string(ms.count())}});
+            }
         } catch (const vk::Exception& exception) {
             LOG_CRITICAL(Render_Vulkan, "Adreno rejected compute shader {:016X}: {}", shader_hash,
                          exception.what());

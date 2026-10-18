@@ -69,6 +69,9 @@ enum class Stage : u8 {
 
 using Fields = std::vector<std::pair<std::string, std::string>>;
 
+/// Driver pipeline creations at least this long are recorded as events with the shader hash.
+inline constexpr std::chrono::milliseconds SlowPipelineThreshold{250};
+
 namespace Detail {
 extern std::atomic<bool> g_capturing;
 }

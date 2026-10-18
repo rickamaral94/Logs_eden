@@ -40,6 +40,10 @@ class DiagnosticsRedactor(knownDirectories: Map<String, String> = emptyMap()) {
     /** Full redaction for free text such as logs and user notes. */
     fun redactText(text: String): String {
         var result = redactPaths(text)
+        result = SENSITIVE_SETTING_PATTERN.replace(result) {
+            replacements++
+            "${it.groupValues[1]}<redacted>"
+        }
         for ((pattern, placeholder) in NETWORK_PATTERNS) {
             result = pattern.replace(result) {
                 replacements++
@@ -68,6 +72,11 @@ class DiagnosticsRedactor(knownDirectories: Map<String, String> = emptyMap()) {
                     "/data/app)(?:/[^\\s\"'<>:,;)]*)?"
             ) to "<path>",
             Regex("(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b") to "<email>"
+        )
+
+        // Settings printed by Settings::LogSettings that can hold a user-chosen name or URL.
+        private val SENSITIVE_SETTING_PATTERN = Regex(
+            "((?:eden_username|device_name|web_api_url)\\s*[:=]\\s*)[^\\r\\n]+"
         )
 
         private val NETWORK_PATTERNS = listOf(

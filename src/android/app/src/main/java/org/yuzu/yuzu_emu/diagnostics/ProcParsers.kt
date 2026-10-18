@@ -66,13 +66,17 @@ object ProcParsers {
         }
         return when {
             name.startsWith("CPUCore_") || name == "CPUThread" -> "emu_cpu"
-            name == "GPU" -> "emu_gpu"
+            name == "GPU" || name.startsWith("GPUFencingThrea") -> "emu_gpu"
+            name == "NativeEmulation" -> "emu_main"
+            name.substringBefore(':') in HLE_SERVICE_THREADS -> "emu_hle_services"
             name.startsWith("VulkanWorker") || name.startsWith("VulkanPresent") -> "vulkan"
             name.startsWith("VkPipeline") || name.startsWith("ShaderWorker") -> "shader_pipeline"
             name.startsWith("ImageTranscode") || name.startsWith("TextureDecoder") -> "texture"
             name.startsWith("Audio") || name.startsWith("DSP_") || name.startsWith("cubeb") ||
-                name.startsWith("AAudio") || name.startsWith("Oboe") -> "audio"
-            name == "RenderThread" || name.startsWith("hwui") -> "ui"
+                name.startsWith("AAudio") || name.startsWith("Oboe") ||
+                name.startsWith("SDLAudio") -> "audio"
+            name == "RenderThread" || name.startsWith("hwui") ||
+                name.startsWith("VsyncReceiver") -> "ui"
             name.startsWith("HostTiming") || name.startsWith("VSyncThread") ||
                 name.startsWith("TimeWorker") -> "timing"
             name.startsWith("HeapTaskDaemon") || name.startsWith("FinalizerDaemon") ||
@@ -83,4 +87,15 @@ object ProcParsers {
     }
 
     private val WHITESPACE = Regex("\\s+")
+
+    // Host threads of the emulated HLE services (core/hle/service/services.cpp), named after
+    // the service, optionally with a ":N" suffix for additional threads.
+    private val HLE_SERVICE_THREADS = setOf(
+        "FS", "Loader", "LogManager.Prod", "NCM", "ProcessManager", "account", "am", "aoc",
+        "apm", "audio", "bcat", "bpc", "bsdsocket", "btdrv", "btm", "capsrv", "erpt", "es",
+        "eupld", "fatal", "fgm", "friends", "glue", "gpio", "grc", "hid", "i2c", "jit", "lbl",
+        "ldn", "mig", "mii", "mm", "mnpp", "nfc", "nfp", "ngc", "nifm", "nim", "npns", "ns",
+        "nvnflinger", "nvservices", "olsc", "omm", "pcie", "pctl", "pcv", "prepo", "psc", "ptm",
+        "ro", "settings", "sm", "spl", "ssl", "tma", "usb", "wlan"
+    )
 }

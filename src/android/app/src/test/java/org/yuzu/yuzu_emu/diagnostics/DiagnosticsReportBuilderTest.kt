@@ -150,6 +150,25 @@ class DiagnosticsReportBuilderTest {
     }
 
     @Test
+    fun hitchesListWindowsOverThreshold() {
+        val hitches = build().report["hitches"]!!.jsonObject
+        assertEquals(1, hitches["windows_over_threshold"]!!.jsonPrimitive.content.toInt())
+        val window = hitches["windows"]!!.jsonArray.single().jsonObject
+        assertEquals(4.0, window["t_s"]!!.jsonPrimitive.content.toDouble(), 0.001)
+        assertEquals(
+            120.0,
+            window["guest_frame_interval_max_ms"]!!.jsonPrimitive.content.toDouble(),
+            0.001
+        )
+        assertEquals(
+            2.0,
+            window["pipeline_build_wait_max_ms"]!!.jsonPrimitive.content.toDouble(),
+            0.001
+        )
+        assertTrue(build().summary.contains("Longest frame intervals"))
+    }
+
+    @Test
     fun personalDataIsRedactedEverywhere() {
         val plan = build()
         val all = plan.entries.joinToString("\n") { String(it.content) }

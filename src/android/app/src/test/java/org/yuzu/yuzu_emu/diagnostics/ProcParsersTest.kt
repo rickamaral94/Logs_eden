@@ -53,5 +53,10 @@ class ProcParsersTest {
         assertEquals("audio", ProcParsers.threadCategory("DSP_AudioRende", false))
         assertEquals("ui", ProcParsers.threadCategory("anything", true))
         assertEquals("other", ProcParsers.threadCategory("Binder:1234_2", false))
+        assertEquals("emu_gpu", ProcParsers.threadCategory("GPUFencingThrea", false))
+        assertEquals("emu_main", ProcParsers.threadCategory("NativeEmulation", false))
+        assertEquals("emu_hle_services", ProcParsers.threadCategory("nvservices", false))
+        assertEquals("emu_hle_services", ProcParsers.threadCategory("FS:2", false))
+        assertEquals("ui", ProcParsers.threadCategory("VsyncReceiver", false))
     }
 }
