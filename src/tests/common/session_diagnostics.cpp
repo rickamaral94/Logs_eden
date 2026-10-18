@@ -90,8 +90,7 @@ TEST_CASE("SessionDiagnostics: frame interval percentiles", "[common]") {
     REQUIRE(frames["over_100ms"] == 1);
     REQUIRE(frames["over_2x_median"] == 2);
 
-    const json session =
-        json::parse(SessionSummaryJson())["frames"]["guest_present_interval"];
+    const json session = json::parse(SessionSummaryJson())["frames"]["guest_present_interval"];
     REQUIRE(session["count"] == 100);
     // Histogram percentiles report the upper bound of a 0.25 ms bucket.
     REQUIRE(session["p50_ms"] == 16.25);
@@ -174,8 +173,7 @@ TEST_CASE("SessionDiagnostics: concurrent recording and sampling", "[common]") {
     StopCapture();
 }
 
-TEST_CASE("SessionDiagnostics: critical marker is written to the session directory",
-          "[common]") {
+TEST_CASE("SessionDiagnostics: critical marker is written to the session directory", "[common]") {
     const auto dir = std::filesystem::temp_directory_path() / "eden_session_diag_test";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);

@@ -13,6 +13,7 @@
 
 #include "video_core/renderer_vulkan/vk_query_cache.h"
 
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "common/thread.h"
 #include "video_core/gpu_logging/gpu_logging.h"
@@ -361,8 +362,12 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
         }
 
         std::scoped_lock lock{submit_mutex};
-        switch (const VkResult result = master_semaphore->SubmitQueue(
-                    cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value)) {
+        const VkResult submit_result = [&] {
+            Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::QueueSubmit};
+            return master_semaphore->SubmitQueue(cmdbuf, upload_cmdbuf, signal_semaphore,
+                                                 wait_semaphore, signal_value);
+        }();
+        switch (const VkResult result = submit_result) {
         case VK_SUCCESS:
             // Log successful queue submission
             if (GPU::Logging::IsActive() &&

@@ -17,6 +17,7 @@
 #include "common/logging.h"
 #include <ranges>
 #include "common/scope_exit.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "core/core_timing.h"
 #include "core/frontend/graphics_context.h"
@@ -191,12 +192,18 @@ try
 #endif
 
     Report();
+    Common::Diagnostics::RegisterSampler("vulkan_memory_budget",
+                                         [this] { return device.GetMemoryBudgetJson(); });
 } catch (const vk::Exception& exception) {
     LOG_ERROR(Render_Vulkan, "Vulkan initialization failed with error: {}", exception.what());
+    Common::Diagnostics::RecordEvent(Common::Diagnostics::Severity::Critical, "vulkan",
+                                     "init_failed", {{"result", exception.what()}});
     throw std::runtime_error{fmt::format("Vulkan initialization error {}", exception.what())};
 }
 
 RendererVulkan::~RendererVulkan() {
+    Common::Diagnostics::SetStage(Common::Diagnostics::Stage::Shutdown);
+    Common::Diagnostics::UnregisterSampler("vulkan_memory_budget");
     scheduler.RegisterOnSubmit([] {});
     void(device.GetLogical().WaitIdle());
 }
@@ -205,6 +212,17 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
     SCOPE_EXIT {
         render_window.OnFrameDisplayed();
     };
+
+    if (Common::Diagnostics::IsCapturing()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (last_composite_time.time_since_epoch().count() != 0) {
+            Common::Diagnostics::RecordFrameInterval(Common::Diagnostics::FrameSeries::HostPresent,
+                                                     now - last_composite_time);
+        }
+        last_composite_time = now;
+    } else {
+        last_composite_time = {};
+    }
 
     RenderAppletCaptureLayer(framebuffers);
 
@@ -265,6 +283,12 @@ void RendererVulkan::Report() const {
     LOG_INFO(Render_Vulkan, "Device: {}", model_name);
     LOG_INFO(Render_Vulkan, "Vulkan: {}", api_version);
     LOG_INFO(Render_Vulkan, "Available VRAM: {:.2f} GiB", available_vram);
+
+    try {
+        Common::Diagnostics::SetSection("vulkan_device", device.GetDiagnosticsJson());
+    } catch (const std::exception& e) {
+        LOG_WARNING(Render_Vulkan, "Failed to collect Vulkan diagnostics: {}", e.what());
+    }
 }
 
 vk::Buffer RendererVulkan::RenderToBuffer(std::span<const Tegra::FramebufferConfig> framebuffers,

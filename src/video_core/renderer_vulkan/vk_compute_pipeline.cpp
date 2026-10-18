@@ -23,6 +23,7 @@
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 #include "video_core/gpu_logging/gpu_logging.h"
 #include "common/logging.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 
 namespace Vulkan {
@@ -111,10 +112,17 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
             .basePipelineIndex = 0,
         };
         try {
+            Common::Diagnostics::ScopedTimer timer{
+                Common::Diagnostics::Timer::ComputePipelineCreate};
             pipeline = device.GetLogical().CreateComputePipeline(compute_ci, *pipeline_cache);
         } catch (const vk::Exception& exception) {
             LOG_CRITICAL(Render_Vulkan, "Adreno rejected compute shader {:016X}: {}", shader_hash,
                          exception.what());
+            Common::Diagnostics::Increment(Common::Diagnostics::Counter::PipelineCreateFailed);
+            Common::Diagnostics::RecordEvent(Common::Diagnostics::Severity::Error, "pipeline",
+                                             "compute_create_failed",
+                                             {{"shader_hash", fmt::format("{:016x}", shader_hash)},
+                                              {"result", exception.what()}});
             std::scoped_lock lock{build_mutex};
             is_built = true;
             build_condvar.notify_one();
@@ -261,6 +269,7 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
     if (!is_built.load(std::memory_order::relaxed)) {
         // Wait for the pipeline to be built
         scheduler.Record([this](vk::CommandBuffer) {
+            Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::PipelineBuildWait};
             std::unique_lock lock{build_mutex};
             build_condvar.wait(lock, [this] { return is_built.load(std::memory_order::relaxed); });
         });

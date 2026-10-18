@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <variant>
@@ -105,6 +106,7 @@ private:
     FrameGen frame_gen;
 #endif
     std::optional<TurboMode> turbo_mode;
+    std::chrono::steady_clock::time_point last_composite_time{};
 
     Frame applet_frame;
 };

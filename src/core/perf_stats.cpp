@@ -16,6 +16,7 @@
 #include "common/fs/file.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "core/perf_stats.h"
 
@@ -80,6 +81,9 @@ void PerfStats::EndSystemFrame() {
     system_frames += 1;
 
     previous_frame_length = frame_end - previous_frame_end;
+    Common::Diagnostics::RecordFrameInterval(
+        Common::Diagnostics::FrameSeries::GuestPresent,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(previous_frame_length));
     previous_frame_end = frame_end;
 }
 

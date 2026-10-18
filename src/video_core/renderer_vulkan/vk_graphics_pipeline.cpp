@@ -28,6 +28,7 @@
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/gpu_logging/gpu_logging.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 
 #if defined(_MSC_VER) && defined(NDEBUG)
@@ -313,9 +314,15 @@ GraphicsPipeline::GraphicsPipeline(
         const VkRenderPass render_pass{render_pass_cache.Get(MakeRenderPassKey(key.state, device))};
         Validate();
         try {
+            Common::Diagnostics::ScopedTimer timer{
+                Common::Diagnostics::Timer::GraphicsPipelineCreate};
             MakePipeline(render_pass);
         } catch (const vk::Exception& exception) {
             LOG_CRITICAL(Render_Vulkan, "Graphics pipeline build failed: {}", exception.what());
+            Common::Diagnostics::Increment(Common::Diagnostics::Counter::PipelineCreateFailed);
+            Common::Diagnostics::RecordEvent(Common::Diagnostics::Severity::Error, "pipeline",
+                                             "graphics_create_failed",
+                                             {{"result", exception.what()}});
             std::scoped_lock lock{build_mutex};
             is_built = true;
             build_condvar.notify_one();
@@ -599,6 +606,7 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
     if (!is_built.load(std::memory_order::relaxed)) {
         // Wait for the pipeline to be built
         scheduler.Record([this](vk::CommandBuffer) {
+            Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::PipelineBuildWait};
             std::unique_lock lock{build_mutex};
             build_condvar.wait(lock, [this] { return is_built.load(std::memory_order::relaxed); });
         });

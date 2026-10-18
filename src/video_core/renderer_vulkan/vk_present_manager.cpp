@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "common/thread.h"
 #include "core/frontend/emu_window.h"
@@ -568,8 +569,11 @@ void PresentManager::CopyToSwapchainImpl(Frame* frame) {
     // Submit the image copy/blit to the swapchain
     {
         std::scoped_lock submit_lock{scheduler.submit_mutex};
-        switch (const VkResult result =
-                    device.GetGraphicsQueue().Submit(submit_info, *frame->present_done)) {
+        const VkResult submit_result = [&] {
+            Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::PresentQueueSubmit};
+            return device.GetGraphicsQueue().Submit(submit_info, *frame->present_done);
+        }();
+        switch (const VkResult result = submit_result) {
         case VK_SUCCESS:
             break;
         case VK_ERROR_DEVICE_LOST:

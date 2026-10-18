@@ -142,12 +142,8 @@ constexpr std::array<std::string_view, TimerCount> TIMER_NAMES{
 };
 
 constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
-    "graphics_pipeline_cache_miss",
-    "compute_pipeline_cache_miss",
-    "draw_skipped_pipeline_pending",
-    "pipeline_create_failed",
-    "shader_translate_failed",
-    "swapchain_created",
+    "graphics_pipeline_cache_miss", "compute_pipeline_cache_miss", "draw_skipped_pipeline_pending",
+    "pipeline_create_failed",       "shader_translate_failed",     "swapchain_created",
     "disk_pipelines_loaded",
 };
 
@@ -200,8 +196,7 @@ double HistogramPercentileMs(const FrameSession& session, double p) {
     if (session.count == 0) {
         return 0.0;
     }
-    const auto target =
-        static_cast<u64>(std::ceil(p * static_cast<double>(session.count)));
+    const auto target = static_cast<u64>(std::ceil(p * static_cast<double>(session.count)));
     u64 seen = 0;
     for (size_t bucket = 0; bucket < session.histogram.size(); ++bucket) {
         seen += session.histogram[bucket];
@@ -427,7 +422,8 @@ void AddTiming(Timer timer, std::chrono::nanoseconds duration) noexcept {
         return;
     }
     auto& state = GetState();
-    const auto ns = static_cast<u64>((std::max)(duration.count(), s64{0}));
+    const auto ns =
+        static_cast<u64>((std::max)(duration, std::chrono::nanoseconds::zero()).count());
     state.window_timers[static_cast<size_t>(timer)].Add(ns);
     state.session_timers[static_cast<size_t>(timer)].Add(ns);
 }
@@ -451,7 +447,7 @@ void RecordFrameInterval(FrameSeries series, std::chrono::nanoseconds interval) 
     if (us_count <= 0) {
         return;
     }
-    const auto us = static_cast<u32>((std::min)(us_count, s64{UINT32_MAX}));
+    const auto us = us_count > UINT32_MAX ? UINT32_MAX : static_cast<u32>(us_count);
     auto& state = GetState();
     std::scoped_lock lock{state.frames_mutex};
     auto& window = state.frame_windows[static_cast<size_t>(series)];
@@ -475,9 +471,8 @@ void RecordEvent(Severity severity, std::string_view category, std::string_view 
     std::scoped_lock lock{state.events_mutex};
     if (!state.events.empty()) {
         Event& last = state.events.back();
-        if (last.seq > state.last_sampled_seq && last.severity == severity &&
-            last.stage == stage && last.category == category && last.name == name &&
-            last.fields == fields) {
+        if (last.seq > state.last_sampled_seq && last.severity == severity && last.stage == stage &&
+            last.category == category && last.name == name && last.fields == fields) {
             ++last.repeat;
             last.last_mono_ms = now;
             return;

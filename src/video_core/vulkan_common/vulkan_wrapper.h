@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <source_location>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -131,17 +132,24 @@ private:
     VkResult result;
 };
 
+/// Records a failed Check in the session diagnostics event ring.
+void ReportCheckFailure(VkResult result, const std::source_location& location) noexcept;
+
 /// Throws a Vulkan exception if result is not success.
-inline void Check(VkResult result) {
+inline void Check(VkResult result,
+                  const std::source_location location = std::source_location::current()) {
     if (result != VK_SUCCESS) {
+        ReportCheckFailure(result, location);
         throw Exception(result);
     }
 }
 
 /// Throws a Vulkan exception if result is an error.
 /// @return result
-inline VkResult Filter(VkResult result) {
+inline VkResult Filter(VkResult result,
+                       const std::source_location location = std::source_location::current()) {
     if (result < 0) {
+        ReportCheckFailure(result, location);
         throw Exception(result);
     }
     return result;

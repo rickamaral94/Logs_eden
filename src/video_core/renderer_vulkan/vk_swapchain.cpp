@@ -9,11 +9,14 @@
 #include <limits>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #ifdef __ANDROID__
 #include <android/api-level.h>
 #endif
 
 #include "common/logging.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "common/settings_enums.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -341,6 +344,33 @@ void Swapchain::CreateSwapchain(const VkSurfaceCapabilitiesKHR& capabilities) {
 
     images = swapchain.GetImages();
     image_count = static_cast<u32>(images.size());
+
+    namespace Diag = Common::Diagnostics;
+    Diag::Increment(Diag::Counter::SwapchainCreated);
+    try {
+        nlohmann::json available_modes = nlohmann::json::array();
+        for (const auto mode : present_modes) {
+            available_modes.push_back(string_VkPresentModeKHR(mode));
+        }
+        const nlohmann::json section{
+            {"format", string_VkFormat(surface_format.format)},
+            {"color_space", string_VkColorSpaceKHR(surface_format.colorSpace)},
+            {"present_mode", string_VkPresentModeKHR(present_mode)},
+            {"available_present_modes", std::move(available_modes)},
+            {"width", extent.width},
+            {"height", extent.height},
+            {"requested_image_count", requested_image_count},
+            {"image_count", image_count},
+            {"min_image_count", capabilities.minImageCount},
+            {"max_image_count", capabilities.maxImageCount},
+            {"current_transform", updated_capabilities.currentTransform},
+            {"mutable_format", device.IsKhrSwapchainMutableFormatEnabled()},
+            {"created_mono_ms", Diag::MonotonicMs()},
+        };
+        Diag::SetSection("vulkan_swapchain", section.dump());
+    } catch (const std::exception& e) {
+        LOG_WARNING(Render_Vulkan, "Failed to describe swapchain for diagnostics: {}", e.what());
+    }
 #ifdef __ANDROID__
     // Android is already ordered the same as Switch.
     image_view_format = VK_FORMAT_R8G8B8A8_UNORM;

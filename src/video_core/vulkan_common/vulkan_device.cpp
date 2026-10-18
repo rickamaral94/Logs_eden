@@ -17,15 +17,18 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #include "common/assert.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
 #include "common/literals.h"
+#include "common/session_diagnostics.h"
 #include <ranges>
 #include "common/settings.h"
 #include "common/settings_enums.h"
 #include "video_core/vulkan_common/nsight_aftermath_tracker.h"
+#include "video_core/vulkan_common/vk_enum_string_helper.h"
 #include "video_core/vulkan_common/vma.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -896,6 +899,10 @@ VkFormat Device::GetSupportedFormat(VkFormat wanted_format, VkFormatFeatureFlags
 
 void Device::ReportLoss() const {
     LOG_CRITICAL(Render_Vulkan, "Device loss occurred!");
+    Common::Diagnostics::RecordEvent(
+        Common::Diagnostics::Severity::Critical, "vulkan", "device_lost",
+        {{"device", std::string{GetModelName()}}, {"driver", GetDriverName()}});
+    Common::Diagnostics::WriteCriticalMarker("vulkan_device_lost");
 
     // Wait for the log to flush and for Nsight Aftermath to dump the results
     std::this_thread::sleep_for(std::chrono::seconds{15});
@@ -962,6 +969,220 @@ bool Device::IsFormatSupported(VkFormat wanted_format, VkFormatFeatureFlags want
 
 std::string Device::GetDriverName() const {
     return vk::GetDriverName(properties.driver);
+}
+
+std::string Device::GetDiagnosticsJson() const {
+    using nlohmann::json;
+    const auto& props = properties.properties;
+    const auto& limits = props.limits;
+    const auto version = [](u32 v) {
+        return fmt::format("{}.{}.{}", VK_API_VERSION_MAJOR(v), VK_API_VERSION_MINOR(v),
+                           VK_API_VERSION_PATCH(v));
+    };
+
+    json queue_families = json::array();
+    const auto families = physical.GetQueueFamilyProperties();
+    for (u32 index = 0; index < families.size(); ++index) {
+        const auto& family = families[index];
+        queue_families.push_back({
+            {"index", index},
+            {"queue_flags", family.queueFlags},
+            {"graphics", (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0},
+            {"compute", (family.queueFlags & VK_QUEUE_COMPUTE_BIT) != 0},
+            {"transfer", (family.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0},
+            {"sparse_binding", (family.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) != 0},
+            {"queue_count", family.queueCount},
+            {"timestamp_valid_bits", family.timestampValidBits},
+            {"used_for_graphics", index == graphics_family},
+            {"used_for_present", index == present_family},
+        });
+    }
+
+    const auto memory = physical.GetMemoryProperties().memoryProperties;
+    json heaps = json::array();
+    for (u32 index = 0; index < memory.memoryHeapCount; ++index) {
+        const auto& heap = memory.memoryHeaps[index];
+        heaps.push_back({
+            {"index", index},
+            {"size_bytes", heap.size},
+            {"flags", heap.flags},
+            {"device_local", (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0},
+            {"used_by_eden_budget",
+             std::ranges::find(valid_heap_memory, index) != valid_heap_memory.end()},
+        });
+    }
+    json memory_types = json::array();
+    for (u32 index = 0; index < memory.memoryTypeCount; ++index) {
+        memory_types.push_back({
+            {"index", index},
+            {"heap_index", memory.memoryTypes[index].heapIndex},
+            {"property_flags", memory.memoryTypes[index].propertyFlags},
+        });
+    }
+
+    json core_features = json::object();
+#define CORE_FEATURE(name) core_features[#name] = features2.features.name == VK_TRUE;
+    CORE_FEATURE(robustBufferAccess)
+    CORE_FEATURE(fullDrawIndexUint32)
+    CORE_FEATURE(imageCubeArray)
+    CORE_FEATURE(independentBlend)
+    CORE_FEATURE(geometryShader)
+    CORE_FEATURE(tessellationShader)
+    CORE_FEATURE(sampleRateShading)
+    CORE_FEATURE(dualSrcBlend)
+    CORE_FEATURE(logicOp)
+    CORE_FEATURE(multiDrawIndirect)
+    CORE_FEATURE(drawIndirectFirstInstance)
+    CORE_FEATURE(depthClamp)
+    CORE_FEATURE(depthBiasClamp)
+    CORE_FEATURE(fillModeNonSolid)
+    CORE_FEATURE(depthBounds)
+    CORE_FEATURE(wideLines)
+    CORE_FEATURE(largePoints)
+    CORE_FEATURE(alphaToOne)
+    CORE_FEATURE(multiViewport)
+    CORE_FEATURE(samplerAnisotropy)
+    CORE_FEATURE(textureCompressionETC2)
+    CORE_FEATURE(textureCompressionASTC_LDR)
+    CORE_FEATURE(textureCompressionBC)
+    CORE_FEATURE(occlusionQueryPrecise)
+    CORE_FEATURE(pipelineStatisticsQuery)
+    CORE_FEATURE(vertexPipelineStoresAndAtomics)
+    CORE_FEATURE(fragmentStoresAndAtomics)
+    CORE_FEATURE(shaderTessellationAndGeometryPointSize)
+    CORE_FEATURE(shaderImageGatherExtended)
+    CORE_FEATURE(shaderStorageImageExtendedFormats)
+    CORE_FEATURE(shaderStorageImageMultisample)
+    CORE_FEATURE(shaderStorageImageReadWithoutFormat)
+    CORE_FEATURE(shaderStorageImageWriteWithoutFormat)
+    CORE_FEATURE(shaderUniformBufferArrayDynamicIndexing)
+    CORE_FEATURE(shaderSampledImageArrayDynamicIndexing)
+    CORE_FEATURE(shaderStorageBufferArrayDynamicIndexing)
+    CORE_FEATURE(shaderStorageImageArrayDynamicIndexing)
+    CORE_FEATURE(shaderClipDistance)
+    CORE_FEATURE(shaderCullDistance)
+    CORE_FEATURE(shaderFloat64)
+    CORE_FEATURE(shaderInt64)
+    CORE_FEATURE(shaderInt16)
+    CORE_FEATURE(shaderResourceResidency)
+    CORE_FEATURE(shaderResourceMinLod)
+    CORE_FEATURE(sparseBinding)
+    CORE_FEATURE(variableMultisampleRate)
+    CORE_FEATURE(inheritedQueries)
+#undef CORE_FEATURE
+
+    // Flags Eden derives after suitability checks; true means the feature or extension is used.
+    json eden_flags = json::object();
+#define EXTENSION(prefix, macro_name, var_name) eden_flags[#var_name] = extensions.var_name;
+#define FEATURE(prefix, struct_name, macro_name, var_name)                                         \
+    eden_flags[#var_name] = extensions.var_name;
+    FOR_EACH_VK_FEATURE_1_1(FEATURE);
+    FOR_EACH_VK_FEATURE_1_2(FEATURE);
+    FOR_EACH_VK_FEATURE_1_3(FEATURE);
+    FOR_EACH_VK_FEATURE_1_4(FEATURE);
+    FOR_EACH_VK_FEATURE_EXT(FEATURE);
+    FOR_EACH_VK_EXTENSION(EXTENSION);
+#undef EXTENSION
+#undef FEATURE
+
+    const json out{
+        {"api_version", version(props.apiVersion)},
+        {"driver_version_raw", props.driverVersion},
+        {"vendor_id", props.vendorID},
+        {"device_id", props.deviceID},
+        {"device_type", string_VkPhysicalDeviceType(props.deviceType)},
+        {"device_name", props.deviceName},
+        {"vendor_name", std::string{GetVendorName()}},
+        {"driver",
+         {
+             {"id", string_VkDriverId(properties.driver.driverID)},
+             {"name", properties.driver.driverName},
+             {"info", properties.driver.driverInfo},
+             {"eden_driver_name", GetDriverName()},
+             {"conformance_version",
+              fmt::format("{}.{}.{}.{}", properties.driver.conformanceVersion.major,
+                          properties.driver.conformanceVersion.minor,
+                          properties.driver.conformanceVersion.subminor,
+                          properties.driver.conformanceVersion.patch)},
+         }},
+        {"queue_families", std::move(queue_families)},
+        {"graphics_family", graphics_family},
+        {"present_family", present_family},
+        {"memory_heaps", std::move(heaps)},
+        {"memory_types", std::move(memory_types)},
+        {"memory_budget_supported", extensions.memory_budget},
+        {"eden_device_access_memory_bytes", device_access_memory},
+        {"limits",
+         {
+             {"max_image_dimension_2d", limits.maxImageDimension2D},
+             {"max_push_constants_size", limits.maxPushConstantsSize},
+             {"max_memory_allocation_count", limits.maxMemoryAllocationCount},
+             {"max_bound_descriptor_sets", limits.maxBoundDescriptorSets},
+             {"max_per_stage_descriptor_samplers", limits.maxPerStageDescriptorSamplers},
+             {"max_per_stage_descriptor_storage_buffers",
+              limits.maxPerStageDescriptorStorageBuffers},
+             {"max_per_stage_descriptor_sampled_images", limits.maxPerStageDescriptorSampledImages},
+             {"max_vertex_input_attributes", limits.maxVertexInputAttributes},
+             {"max_vertex_input_bindings", limits.maxVertexInputBindings},
+             {"max_compute_shared_memory_size", limits.maxComputeSharedMemorySize},
+             {"max_viewports", limits.maxViewports},
+             {"max_sampler_anisotropy", limits.maxSamplerAnisotropy},
+             {"timestamp_period_ns", limits.timestampPeriod},
+             {"min_uniform_buffer_offset_alignment", limits.minUniformBufferOffsetAlignment},
+             {"min_storage_buffer_offset_alignment", limits.minStorageBufferOffsetAlignment},
+             {"non_coherent_atom_size", limits.nonCoherentAtomSize},
+         }},
+        {"subgroup",
+         {
+             {"size", properties.subgroup_properties.subgroupSize},
+             {"supported_stages", properties.subgroup_properties.supportedStages},
+             {"supported_operations", properties.subgroup_properties.supportedOperations},
+         }},
+        {"push_descriptor_max", properties.push_descriptor.maxPushDescriptors},
+        {"core_features_requested", std::move(core_features)},
+        {"eden_feature_flags", std::move(eden_flags)},
+        {"extensions_supported", supported_extensions},
+        {"extensions_loaded", loaded_extensions},
+        {"quirks",
+         {
+             {"is_integrated", is_integrated},
+             {"has_broken_compute", has_broken_compute},
+             {"has_broken_cube_compatibility", has_broken_cube_compatibility},
+             {"has_broken_descriptor_aliasing", has_broken_descriptor_aliasing},
+             {"has_broken_parallel_compiling", has_broken_parallel_compiling},
+             {"must_emulate_scaled_formats", must_emulate_scaled_formats},
+             {"supports_d24_depth", supports_d24_depth},
+             {"is_optimal_astc_supported", is_optimal_astc_supported},
+             {"debugging_tool_attached", HasDebuggingToolAttached()},
+         }},
+        {"timeline_semaphore", HasTimelineSemaphore()},
+    };
+    return out.dump();
+}
+
+std::string Device::GetMemoryBudgetJson() const {
+    using nlohmann::json;
+    if (!extensions.memory_budget) {
+        return json{{"available", false}, {"reason", "VK_EXT_memory_budget not enabled"}}.dump();
+    }
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{};
+    budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+    const auto memory = physical.GetMemoryProperties(&budget).memoryProperties;
+    json heaps = json::array();
+    for (u32 index = 0; index < memory.memoryHeapCount; ++index) {
+        heaps.push_back({
+            {"index", index},
+            {"budget_bytes", budget.heapBudget[index]},
+            {"usage_bytes", budget.heapUsage[index]},
+        });
+    }
+    return json{
+        {"available", true},
+        {"source", "VK_EXT_memory_budget"},
+        {"heaps", std::move(heaps)},
+        {"eden_usage_bytes", GetDeviceMemoryUsage()},
+    }
+        .dump();
 }
 
 bool Device::ShouldBoostClocks() const {

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -14,9 +15,13 @@
 #include <vector>
 #include <bit>
 #include <numeric>
+
+#include <nlohmann/json.hpp>
+
 #include "common/cityhash.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
+#include "common/session_diagnostics.h"
 #include "common/thread_worker.h"
 #include "core/core.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
@@ -597,15 +602,21 @@ ComputePipeline* PipelineCache::CurrentComputePipeline() {
     if (!is_new) {
         return pipeline.get();
     }
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::ComputePipelineCacheMiss);
+    Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::ComputeShaderTranslate};
     pipeline = CreateComputePipeline(key, shader);
     return pipeline.get();
 }
 
 void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading,
                                       const VideoCore::DiskResourceLoadCallback& callback) {
+    namespace Diag = Common::Diagnostics;
     if (title_id == 0) {
+        Diag::SetStage(Diag::Stage::Running);
         return;
     }
+    Diag::SetStage(Diag::Stage::ShaderCacheLoad);
+    const auto load_start = std::chrono::steady_clock::now();
     if (!pipeline_cache_filename.empty()) {
         serialization_thread.WaitForRequests();
         if (use_vulkan_pipeline_cache && !vulkan_pipeline_cache_filename.empty()) {
@@ -618,6 +629,8 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
     const auto base_dir{shader_dir / fmt::format("{:016x}", title_id)};
     if (!Common::FS::CreateDir(shader_dir) || !Common::FS::CreateDir(base_dir)) {
         LOG_ERROR(Common_Filesystem, "Failed to create pipeline cache directories");
+        Diag::RecordEvent(Diag::Severity::Error, "shader_cache", "create_directories_failed");
+        Diag::SetStage(Diag::Stage::Running);
         return;
     }
     pipeline_cache_filename = base_dir / "vulkan.bin";
@@ -632,6 +645,7 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
         std::mutex mutex;
         size_t total{};
         size_t built{};
+        size_t restored{};
         bool has_loaded{};
         std::unique_ptr<PipelineStatistics> statistics;
     } state;
@@ -649,6 +663,7 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
             std::scoped_lock lock{state.mutex};
             if (pipeline) {
                 compute_cache.emplace(key, std::move(pipeline));
+                ++state.restored;
             }
             ++state.built;
             if (state.has_loaded) {
@@ -701,6 +716,7 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
             std::scoped_lock lock{state.mutex};
             if (pipeline) {
                 graphics_cache.emplace(key, std::move(pipeline));
+                ++state.restored;
             }
             ++state.built;
             if (state.has_loaded) {
@@ -733,6 +749,24 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
     if (state.statistics) {
         state.statistics->Report();
     }
+
+    Diag::Increment(Diag::Counter::DiskPipelinesLoaded, state.restored);
+    const nlohmann::json cache_section{
+        {"title_id", fmt::format("{:016X}", title_id)},
+        {"cache_version", CACHE_VERSION},
+        {"pipelines_in_file", state.total},
+        {"pipelines_built", state.built},
+        {"pipelines_restored", state.restored},
+        {"load_cancelled", stop_loading.stop_requested()},
+        {"load_duration_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - load_start)
+                                 .count()},
+        {"vulkan_driver_cache_enabled", use_vulkan_pipeline_cache},
+        {"vulkan_driver_cache_bytes", last_cache_size.load(std::memory_order_relaxed)},
+        {"asynchronous_shaders", use_asynchronous_shaders},
+    };
+    Diag::SetSection("shader_cache", cache_section.dump());
+    Diag::SetStage(Diag::Stage::Running);
 }
 
 void PipelineCache::QueueVulkanPipelineCacheFlush() {
@@ -768,6 +802,8 @@ GraphicsPipeline* PipelineCache::CurrentGraphicsPipelineSlowPath() {
     const auto [pair, is_new]{graphics_cache.try_emplace(graphics_key)};
     auto& pipeline{pair->second};
     if (is_new) {
+        Common::Diagnostics::Increment(Common::Diagnostics::Counter::GraphicsPipelineCacheMiss);
+        Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::GraphicsShaderTranslate};
         pipeline = CreateGraphicsPipeline();
     }
     if (!pipeline) {
@@ -794,6 +830,7 @@ GraphicsPipeline* PipelineCache::BuiltPipeline(GraphicsPipeline* pipeline) const
     if (draw_state.index_buffer.count <= 6 || draw_state.vertex_buffer.count <= 6) {
         return pipeline;
     }
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::DrawSkippedPipelinePending);
     return nullptr;
 }
 
@@ -920,6 +957,10 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         env.Dump(hash, key.unique_hashes[index]);
     }
     LOG_ERROR(Render_Vulkan, "{}", exception.what());
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::ShaderTranslateFailed);
+    Common::Diagnostics::RecordEvent(
+        Common::Diagnostics::Severity::Error, "shader", "graphics_translate_failed",
+        {{"pipeline_hash", fmt::format("{:016x}", hash)}, {"what", exception.what()}});
     return nullptr;
 }
 
@@ -1032,6 +1073,10 @@ std::unique_ptr<ComputePipeline> PipelineCache::CreateComputePipeline(
 
 } catch (const Shader::Exception& exception) {
     LOG_ERROR(Render_Vulkan, "{}", exception.what());
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::ShaderTranslateFailed);
+    Common::Diagnostics::RecordEvent(
+        Common::Diagnostics::Severity::Error, "shader", "compute_translate_failed",
+        {{"shader_hash", fmt::format("{:016x}", key.unique_hash)}, {"what", exception.what()}});
     return nullptr;
 }
 

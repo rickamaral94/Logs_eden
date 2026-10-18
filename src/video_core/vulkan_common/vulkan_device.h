@@ -253,6 +253,12 @@ public:
     /// Returns the name of the VkDriverId reported from Vulkan.
     std::string GetDriverName() const;
 
+    /// Describes the device, driver and the configuration in use as JSON for diagnostics.
+    std::string GetDiagnosticsJson() const;
+
+    /// Returns per-heap budget and usage from VK_EXT_memory_budget as JSON.
+    std::string GetMemoryBudgetJson() const;
+
     /// Returns the dispatch loader with direct function pointers of the device.
     const vk::DeviceDispatch& GetDispatchLoader() const {
         return dld;

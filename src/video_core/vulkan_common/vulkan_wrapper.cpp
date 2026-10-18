@@ -12,6 +12,7 @@
 
 #include "common/common_types.h"
 #include "common/logging.h"
+#include "common/session_diagnostics.h"
 #include "video_core/vulkan_common/vk_enum_string_helper.h"
 #include "video_core/vulkan_common/vma.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -333,6 +334,18 @@ bool Load(VkInstance instance, InstanceDispatch& dld) noexcept {
 
 const char* Exception::what() const noexcept {
     return string_VkResult(result);
+}
+
+void ReportCheckFailure(VkResult result, const std::source_location& location) noexcept try {
+    namespace Diag = Common::Diagnostics;
+    const auto severity =
+        result == VK_ERROR_DEVICE_LOST ? Diag::Severity::Critical : Diag::Severity::Error;
+    Diag::RecordEvent(severity, "vulkan", "check_failed",
+                      {{"result", string_VkResult(result)},
+                       {"result_code", std::to_string(static_cast<int>(result))},
+                       {"function", location.function_name()},
+                       {"line", std::to_string(location.line())}});
+} catch (...) {
 }
 
 void Destroy(VkInstance instance, const InstanceDispatch& dld) noexcept {

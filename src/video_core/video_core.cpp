@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "common/logging.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
@@ -55,12 +56,16 @@ void CreateGPU(std::optional<Tegra::GPU>& gpu, Core::Frontend::EmuWindow& emu_wi
     gpu.emplace(system, use_async, use_nvdec);
     auto context = emu_window.CreateSharedContext();
     auto scope = context->Acquire();
+    namespace Diag = Common::Diagnostics;
+    Diag::SetStage(Diag::Stage::RendererInit);
     try {
         auto renderer = CreateRenderer(system, emu_window, *gpu, std::move(context));
         gpu->BindRenderer(std::move(renderer));
     } catch (const std::runtime_error& exception) {
         scope.Cancel();
         LOG_ERROR(HW_GPU, "Failed to initialize GPU: {}", exception.what());
+        Diag::RecordEvent(Diag::Severity::Critical, "renderer", "init_failed",
+                          {{"what", exception.what()}});
         gpu.reset();
     }
 }
