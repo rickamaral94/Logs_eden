@@ -41,6 +41,7 @@ enum class Counter : u32 {
     ShaderTranslateFailed,      ///< Shader recompiler raised an exception.
     SwapchainCreated,           ///< Swapchain (re)creations.
     DiskPipelinesLoaded,        ///< Pipelines restored from the disk shader cache.
+    GameFrames,                 ///< Frames rendered by the game (PerfStats::EndGameFrame).
     Count,
 };
 

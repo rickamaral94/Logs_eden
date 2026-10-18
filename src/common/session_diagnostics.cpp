@@ -142,9 +142,10 @@ constexpr std::array<std::string_view, TimerCount> TIMER_NAMES{
 };
 
 constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
-    "graphics_pipeline_cache_miss", "compute_pipeline_cache_miss", "draw_skipped_pipeline_pending",
-    "pipeline_create_failed",       "shader_translate_failed",     "swapchain_created",
-    "disk_pipelines_loaded",
+    "graphics_pipeline_cache_miss",  "compute_pipeline_cache_miss",
+    "draw_skipped_pipeline_pending", "pipeline_create_failed",
+    "shader_translate_failed",       "swapchain_created",
+    "disk_pipelines_loaded",         "game_frames",
 };
 
 constexpr std::array<std::string_view, SeriesCount> SERIES_NAMES{

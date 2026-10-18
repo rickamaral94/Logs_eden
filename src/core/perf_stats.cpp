@@ -89,6 +89,7 @@ void PerfStats::EndSystemFrame() {
 
 void PerfStats::EndGameFrame() {
     game_frames.fetch_add(1, std::memory_order_relaxed);
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::GameFrames);
 }
 
 double PerfStats::GetMeanFrametime() const {
