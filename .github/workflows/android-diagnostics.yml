@@ -50,7 +50,7 @@ jobs:
           "$RUNNER_TEMP/sd_tsan"
 
   android:
-    name: Android APK (mainline, RelWithDebInfo)
+    name: Android APK (Eden Diagnostics, mainline Release)
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     steps:
@@ -85,12 +85,18 @@ jobs:
           key: android-${{ hashFiles('cpmfile.json', 'src/android/**/*.gradle.kts', 'src/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: android-
 
+      # Release like the official builds, but with its own package id
+      # (dev.eden.eden_emulator.diagnostics) so it installs alongside them.
       - name: Build APK
-        run: sh .ci/android/build.sh -t standard -b RelWithDebInfo
+        env:
+          ORG_GRADLE_PROJECT_diagnosticsBuild: "true"
+        run: sh .ci/android/build.sh -t standard -b Release
 
       - name: Run diagnostics unit tests
         working-directory: src/android
-        run: ./gradlew :app:testMainlineRelWithDebInfoUnitTest --tests 'org.yuzu.yuzu_emu.diagnostics.*'
+        env:
+          ORG_GRADLE_PROJECT_diagnosticsBuild: "true"
+        run: ./gradlew :app:testMainlineReleaseUnitTest --tests 'org.yuzu.yuzu_emu.diagnostics.*'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

@@ -6,6 +6,19 @@ reproduce it.
 
 Captures stay on your device. Nothing is sent anywhere unless you export a bundle and share it.
 
+## Installing next to an official build
+
+Diagnostics builds use their own package id (`dev.eden.eden_emulator.diagnostics`) and appear as
+**Eden Diagnostics**, so they install alongside the official or nightly Eden without replacing it.
+Android keeps the data of each app separate, so on first launch of Eden Diagnostics you need to:
+
+- Install your keys and firmware again, and add your games folder.
+- Copy saves over if you need them (Eden's save export/import), since saves are not shared.
+- Expect the shader cache to start empty; the first run of a game compiles shaders again.
+
+Builds are produced by passing `-PdiagnosticsBuild=true` to Gradle (or setting
+`ORG_GRADLE_PROJECT_diagnosticsBuild=true`). Without it the package id is unchanged.
+
 ## Recording
 
 1. Start the game and get close to the point where the problem happens.

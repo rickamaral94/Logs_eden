@@ -41,6 +41,10 @@ android {
     val isNightly =
         providers.gradleProperty("nightly").orNull?.toBooleanStrictOrNull() ?: false
 
+    // Separate package and name so a diagnostics build installs alongside official builds.
+    val isDiagnosticsBuild =
+        providers.gradleProperty("diagnosticsBuild").orNull?.toBooleanStrictOrNull() ?: false
+
     buildFeatures {
         viewBinding = true
     }
@@ -135,7 +139,10 @@ android {
                 signingConfigs.getByName("default")
             }
 
-            if (isNightly) {
+            if (isDiagnosticsBuild) {
+                applicationIdSuffix = ".diagnostics"
+                manifestPlaceholders += mapOf("appNameSuffix" to " Diagnostics")
+            } else if (isNightly) {
                 applicationIdSuffix = ".nightly"
                 manifestPlaceholders += mapOf("appNameSuffix" to " Nightly")
             } else {
