@@ -359,6 +359,14 @@ class DiagnosticsReportBuilderTest {
         assertEquals("false", gpu["available"]!!.jsonPrimitive.content)
     }
 
+    /** Writes the synthetic example bundle when EDEN_DIAG_EXAMPLE_OUT is set (docs/review). */
+    @Test
+    fun writesExampleBundleOnRequest() {
+        val out = System.getenv("EDEN_DIAG_EXAMPLE_OUT") ?: return
+        val result = DiagnosticsBundleWriter.write(build(), File(out, "example-bundle.zip"))
+        assertTrue(result is BundleResult.Success)
+    }
+
     @Test
     fun bundleWriterReportsUnusableDestination() {
         val blocker = File(root, "not_a_directory").apply { writeText("x") }
