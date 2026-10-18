@@ -188,6 +188,10 @@ object DiagnosticsSession {
                     "game",
                     runCatching { DeviceInfoCollector.game(game) }.getOrElse { errorJson(it) }
                 )
+                put(
+                    "driver_libraries",
+                    runCatching { DriverIdentity.collect() }.getOrElse { errorJson(it) }
+                )
                 put("native", nativeStatic)
                 put("metric_definitions", AndroidMetricsSampler.METRIC_DEFINITIONS)
             }

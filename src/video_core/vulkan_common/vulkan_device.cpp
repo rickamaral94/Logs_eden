@@ -416,12 +416,18 @@ std::filesystem::path StaticPipelineCacheFilename() {
 
 void Device::RemoveExtension(bool& extension, const std::string& extension_name) {
     extension = false;
-    loaded_extensions.erase(extension_name);
+    if (loaded_extensions.erase(extension_name) != 0 &&
+        std::ranges::find(removed_extensions, extension_name,
+                          &std::pair<std::string, std::string>::first) ==
+            removed_extensions.end()) {
+        removed_extensions.emplace_back(extension_name, "eden_workaround_or_setting");
+    }
 }
 
 void Device::RemoveExtensionIfUnsuitable(bool is_suitable, const std::string& extension_name) {
     if (loaded_extensions.contains(extension_name) && !is_suitable) {
         LOG_WARNING(Render_Vulkan, "Removing unsuitable extension {}", extension_name);
+        removed_extensions.emplace_back(extension_name, "required_features_missing");
         this->RemoveExtension(is_suitable, extension_name);
     }
 }
@@ -447,6 +453,7 @@ void Device::RemoveExtensionFeatureIfUnsuitable(bool is_suitable, Feature& featu
                                                 const std::string& extension_name) {
     if (loaded_extensions.contains(extension_name) && !is_suitable) {
         LOG_WARNING(Render_Vulkan, "Removing features for unsuitable extension {}", extension_name);
+        removed_extensions.emplace_back(extension_name, "required_features_missing");
         this->RemoveExtensionFeature(is_suitable, feature, extension_name);
     }
 }
@@ -1089,9 +1096,25 @@ std::string Device::GetDiagnosticsJson() const {
 #undef EXTENSION
 #undef FEATURE
 
+    std::string cache_uuid;
+    for (const u8 byte : props.pipelineCacheUUID) {
+        cache_uuid += fmt::format("{:02x}", byte);
+    }
+    json removed = json::array();
+    for (const auto& [name, kind] : removed_extensions) {
+        removed.push_back({{"extension", name}, {"decision", kind}});
+    }
+    const bool fault_advertised = supported_extensions.contains(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+    const bool fault_enabled = loaded_extensions.contains(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+    const auto setting = [](const auto& value) { return value.Canonicalize(); };
+
     const json out{
         {"api_version", version(props.apiVersion)},
         {"driver_version_raw", props.driverVersion},
+        {"driver_version_vulkan_encoding", version(props.driverVersion)},
+        {"driver_version_note", "Mesa uses the Vulkan major.minor.patch encoding; proprietary "
+                                "drivers use vendor-specific encodings of the raw value"},
+        {"pipeline_cache_uuid", cache_uuid},
         {"vendor_id", props.vendorID},
         {"device_id", props.deviceID},
         {"device_type", string_VkPhysicalDeviceType(props.deviceType)},
@@ -1147,6 +1170,38 @@ std::string Device::GetDiagnosticsJson() const {
         {"eden_feature_flags", std::move(eden_flags)},
         {"extensions_supported", supported_extensions},
         {"extensions_loaded", loaded_extensions},
+        {"extensions_removed_by_eden", std::move(removed)},
+        {"extension_lists_note",
+         "supported = advertised by the driver; loaded = enabled on the VkDevice after Eden's "
+         "checks; a loaded extension or feature bit does not prove a code path uses it, see "
+         "eden_feature_flags and effective_paths"},
+        {"effective_paths",
+         {
+             {"extended_dynamic_state_level",
+              extensions.extended_dynamic_state3   ? 3
+              : extensions.extended_dynamic_state2 ? 2
+              : extensions.extended_dynamic_state  ? 1
+                                                   : 0},
+             {"dyna_state_setting", setting(Settings::values.dyna_state)},
+             {"vertex_input_dynamic_state", extensions.vertex_input_dynamic_state},
+             {"vertex_input_dynamic_state_setting",
+              setting(Settings::values.vertex_input_dynamic_state)},
+             {"descriptor_buffer", extensions.descriptor_buffer},
+             {"buffer_device_address", extensions.buffer_device_address},
+             {"timeline_semaphore", HasTimelineSemaphore()},
+             {"synchronization2", HasSynchronization2()},
+             {"push_descriptor", extensions.push_descriptor},
+             {"native_astc", is_optimal_astc_supported},
+             {"bcn_textures_native", features.features.textureCompressionBC == VK_TRUE},
+         }},
+        {"device_fault",
+         {
+             {"advertised", fault_advertised},
+             {"enabled", fault_enabled},
+             {"queried_on_device_lost", false},
+             {"note", "Eden does not enable VK_EXT_device_fault, so no fault description is "
+                      "queried after VK_ERROR_DEVICE_LOST"},
+         }},
         {"quirks",
          {
              {"is_integrated", is_integrated},

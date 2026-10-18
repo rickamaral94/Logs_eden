@@ -191,6 +191,27 @@ reason.
 - Not instrumented yet: Maxwell command processing and descriptor preparation timers, scheduler
   queue depth, flush reasons, triangle/index counts, barriers and layout transitions.
 
+## Driver identity and effective Vulkan paths
+
+- `graphics_driver.selected` is the package chosen in Eden (system or custom driver metadata);
+  `graphics_driver.loaded` lists the driver and driver-loading shared objects actually mapped by
+  the process (`/proc/self/maps` at capture start) with size, SHA-256 and ELF GNU build-id when
+  the file is readable by the app; `vulkan.device.driver` is what the created device reports.
+- `vulkan.device` adds `pipeline_cache_uuid`, `driver_version_vulkan_encoding` next to the raw
+  value (Mesa uses the Vulkan encoding; proprietary drivers do not),
+  `extensions_removed_by_eden` (`required_features_missing` or `eden_workaround_or_setting`),
+  `effective_paths` (extended dynamic state level and its setting, vertex input dynamic state,
+  descriptor buffer, buffer device address, timeline semaphore, synchronization2, push
+  descriptors, native ASTC and BCn) and `device_fault` (advertised/enabled; Eden does not enable
+  `VK_EXT_device_fault`, so nothing is queried on device loss). `extensions_supported` is what
+  the driver advertises and `extensions_loaded` what was enabled on the `VkDevice`; neither proves
+  a code path uses a feature. Decisions internal to the driver (GMEM vs sysmem, register spilling)
+  are not visible through Vulkan and need driver-side instrumentation.
+- `configuration_hashes`: SHA-256 of the sorted `category.name=value` lines of the exported
+  settings (personal identifiers and wall-clock RTC values excluded), of the per-game subset and
+  of the enabled add-ons, plus the game build id and the observed shader cache state
+  (`disk_cache_present`/`disk_cache_empty` from the pipeline cache file at title load).
+
 ## Report schema (version 2)
 
 Field names are stable. Additive changes keep `schema_version`; renaming or removing a field, or
@@ -208,7 +229,8 @@ Top-level fields of `report.json`:
 | `session` | Contents of `session.json`, or `{available:false}` for a snapshot |
 | `app` | Application id, version name/code, build type, flavor |
 | `device` | SoC, ABIs, Android release/API, kernel, cores, max frequencies, RAM, display. `identity` (manufacturer, model, device, product, fingerprint) is replaced by `"removed_by_user"` when the user opts out |
-| `graphics_driver` | Driver selection as configured in Eden (`system` or `custom` + custom driver metadata) |
+| `graphics_driver` | `selected` (Eden setting: `system` or `custom` + metadata) and `loaded` (mapped libraries with hashes); schema 1 had the selection at the top level |
+| `configuration_hashes` | Settings, per-game settings and add-on hashes, game build id, shader cache state |
 | `game.frontend` | Title, program id, homebrew flag, add-ons (name, version, type, enabled). Game files are never read |
 | `game.native` | Program id and build id of the running process |
 | `build` | Eden version, branch, description, revision, build id/date, compiler |
@@ -335,3 +357,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | 2 | Capture scoping: `events.native` holds only this capture (schema 1 mixed earlier captures in and kept `during_capture=true` for them), new `events.native_context`/`native_scope`; `identity`, `session_end`, `identity_changes`, `log_coverage`, `log_digest`, `manifest.json`; identity fields frozen at capture start; `exit_reasons` gain `pid`, `category`, `relation`; `native_summary.capturing` is false and `duration_ms` final after stop; `logs/eden_log.txt` holds the capture's lines instead of the file tail; `serial_unit`/`serial_battery` removed |
 | 2 (additive) | `gpu_timing` (report), `native_summary.gpu_timing`, `samples[].native.gpu_timing`; `frame_gpu_max_ms` in `hitches`; `session.gpu_timestamps_enabled`; `device_lost` events carry `host_frame_id` and `game_run_id` |
 | 2 (additive) | `fence_wait_by_reason`, `fence_wait_by_thread` (samples and native summary); timers `swapchain_acquire_cpu`, `swapchain_present_cpu`, `frame_pacing_throttle`; counters `scheduler_submits`, `draw_calls`, `indexed_draw_calls`, `indirect_draw_calls`, `compute_dispatches`, `render_passes`, `staging_upload_bytes`, `staging_download_bytes`; report `cpu_waits`, `workload`; `vulkan.swapchain.present_mode_inputs`; `swapchain/recreate` events |
+| 2 | `graphics_driver` split into `selected` (the schema 1 object) and `loaded`; `vulkan.device` adds `pipeline_cache_uuid`, `driver_version_vulkan_encoding`, `extensions_removed_by_eden`, `effective_paths`, `device_fault`; report `configuration_hashes` |

@@ -155,11 +155,38 @@ class DiagnosticsReportBuilder(
             )
             put("app", staticStart?.get("app") ?: JsonNull)
             put("device", deviceSection(staticStart?.get("device")))
-            put("graphics_driver", staticStart?.get("graphics_driver") ?: JsonNull)
+            put(
+                "graphics_driver",
+                buildJsonObject {
+                    put(
+                        "selected",
+                        staticStart?.get("graphics_driver") ?: JsonNull
+                    )
+                    put(
+                        "loaded",
+                        staticStart?.get("driver_libraries")
+                            ?: unavailable("not recorded by this build")
+                    )
+                    put(
+                        "note",
+                        "selected = package chosen in Eden; loaded = shared objects mapped by " +
+                            "the process; the device that ran is vulkan.device.driver"
+                    )
+                }
+            )
             put("game", gameSection(staticStart?.get("game"), identity?.get("game")))
             put("build", identity?.get("build") ?: JsonNull)
             put("cpu_backend", identity?.get("cpu_backend") ?: JsonNull)
             put("settings", filterSettings(identity?.get("settings")))
+            put(
+                "configuration_hashes",
+                configurationHashes(
+                    filterSettings(identity?.get("settings")),
+                    staticStart?.get("game")?.asObject(),
+                    identity?.get("game")?.asObject(),
+                    native?.get("sections")?.asObject()?.get("shader_cache")?.asObject()
+                )
+            )
             put(
                 "vulkan",
                 buildJsonObject {
@@ -365,6 +392,65 @@ class DiagnosticsReportBuilder(
                 )
             }
         )
+    }
+
+    /**
+     * Canonical hashes to tell whether two reports ran the same configuration. Personal values
+     * are already filtered out; wall-clock RTC settings are excluded as volatile.
+     */
+    private fun configurationHashes(
+        settings: JsonElement,
+        game: JsonObject?,
+        nativeGame: JsonObject?,
+        shaderCache: JsonObject?
+    ): JsonObject {
+        val entries = (settings as? JsonArray).orEmpty().mapNotNull { it.asObject() }
+            .filter { it.str("name") !in VOLATILE_SETTING_NAMES }
+            .map { "${it.str("category")}.${it.str("name")}=${it.str("value")}" to it }
+            .sortedBy { it.first }
+        fun hash(lines: List<String>) = sha256(lines.joinToString("\n").toByteArray())
+        val patches = (game?.get("patches") as? JsonArray).orEmpty().mapNotNull { it.asObject() }
+            .filter { it.str("enabled") == "true" }
+            .map { "${it.str("type")}:${it.str("name")}:${it.str("version")}" }
+            .sorted()
+        val inFile = shaderCache.num("pipelines_in_file")
+        return buildJsonObject {
+            put("method", "SHA-256 of sorted category.name=value lines")
+            put("effective_settings_sha256", hash(entries.map { it.first }))
+            put(
+                "per_game_settings_sha256",
+                hash(entries.filter { it.second.str("per_game") == "true" }.map { it.first })
+            )
+            put("settings_count", entries.size)
+            put(
+                "excluded",
+                buildJsonArray {
+                    (EXCLUDED_SETTING_NAMES + VOLATILE_SETTING_NAMES).sorted().forEach { add(it) }
+                }
+            )
+            put("enabled_patches_sha256", hash(patches))
+            put("enabled_patches", patches.size)
+            put("game_build_id", nativeGame?.get("build_id") ?: JsonNull)
+            put(
+                "shader_cache_state",
+                buildJsonObject {
+                    put(
+                        "observed",
+                        when {
+                            inFile == null -> "unknown"
+                            inFile > 0 -> "disk_cache_present"
+                            else -> "disk_cache_empty"
+                        }
+                    )
+                    put("pipelines_in_file", inFile)
+                    put(
+                        "source",
+                        "pipeline cache file at title load; runtime misses alone do not " +
+                            "prove a cold cache"
+                    )
+                }
+            )
+        }
     }
 
     private fun filterSettings(settings: JsonElement?): JsonElement {
@@ -1045,6 +1131,20 @@ class DiagnosticsReportBuilder(
             appendLine("== Vulkan ==")
             appendLine("GPU: ${vkDevice.str("device_name")}  API ${vkDevice.str("api_version")}")
             appendLine("Driver: ${driver.str("id")} ${driver.str("name")} ${driver.str("info")}")
+            val loaded = report["graphics_driver"]?.asObject()?.get("loaded")?.asObject()
+            (loaded?.get("libraries") as? JsonArray)?.forEach { l ->
+                val lib = l.asObject()
+                appendLine(
+                    "Loaded: ${lib.str("path").substringAfterLast('/')} " +
+                        "build-id ${lib.str("elf_build_id")} sha256 " +
+                        lib.str("sha256").take(16)
+                )
+            }
+            appendLine(
+                "Pipeline cache UUID: ${vkDevice.str("pipeline_cache_uuid")}  settings sha256: " +
+                    report["configuration_hashes"]?.asObject().str("effective_settings_sha256")
+                        .take(16)
+            )
             appendLine(
                 "Swapchain: ${swapchain.str("width")}x${swapchain.str("height")} " +
                     "${swapchain.str("format")} ${swapchain.str("present_mode")} " +
@@ -1297,6 +1397,9 @@ class DiagnosticsReportBuilder(
 
         /** Console identifiers left out of exports; the emulator keeps using its values. */
         val EXCLUDED_SETTING_NAMES = setOf("serial_battery", "serial_unit")
+
+        /** Wall-clock values that differ between runs without changing the configuration. */
+        val VOLATILE_SETTING_NAMES = setOf("custom_rtc", "custom_rtc_offset")
 
         fun sha256(bytes: ByteArray): String =
             java.security.MessageDigest.getInstance("SHA-256").digest(bytes)

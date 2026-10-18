@@ -341,6 +341,18 @@ class DiagnosticsReportBuilderTest {
     }
 
     @Test
+    fun configurationHashesIgnoreExcludedSettings() {
+        val hashes = build().report["configuration_hashes"]!!.jsonObject
+        assertEquals(64, hashes["effective_settings_sha256"]!!.jsonPrimitive.content.length)
+        assertEquals("1", hashes["settings_count"]!!.jsonPrimitive.content)
+        val driver = build().report["graphics_driver"]!!.jsonObject
+        assertEquals(
+            "system",
+            driver["selected"]!!.jsonObject["selection"]!!.jsonPrimitive.content
+        )
+    }
+
+    @Test
     fun gpuTimingUnavailableIsExplicit() {
         File(session, DiagnosticsSchema.STATIC_END_FILE).delete()
         val gpu = build().report["gpu_timing"]!!.jsonObject
