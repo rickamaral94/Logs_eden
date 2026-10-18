@@ -78,6 +78,15 @@ the bundle.
 | `logs/eden_gpu.log` | GPU logger output, optional, if present |
 | `advanced/gpu_crashes/*` | GPU logger state dumps, opt-in only |
 
+## Comparing reports
+
+`tools/diagnostics/compare_reports.py A.zip B.zip` (or two `report.json` files) prints the
+differences between two sessions: build, driver, settings, loaded extensions and Eden feature
+flags, swapchain and shader cache, frame time percentiles, counters and timers normalized per
+minute, process/system metrics and native error events. It uses only the Python standard
+library and lists differences without attributing causes. Tests:
+`python3 -m unittest discover -s tools/diagnostics/tests`.
+
 ## Report schema (version 1)
 
 Field names are stable. Additive changes keep `schema_version`; renaming or removing a field, or
