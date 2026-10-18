@@ -242,12 +242,8 @@ class AndroidMetricsSampler(
 
     private fun readThreads(): List<ThreadCpuStat> =
         File("/proc/self/task").listFiles()?.mapNotNull { dir ->
-            runCatching {
-                ProcParsers.parseThreadStat(
-                    dir.resolve("stat").readText(),
-                    dir.resolve("comm").readText()
-                )
-            }.getOrNull()
+            runCatching { ProcParsers.parseThreadStat(dir.resolve("stat").readText()) }
+                .getOrNull()
         }.orEmpty()
 
     private fun readCpuFrequenciesMhz(): List<Long?> {

@@ -32,6 +32,19 @@ constexpr size_t MaxEvents = 256;
 constexpr size_t MaxWindowFrames = 16384;
 constexpr u32 HistogramBucketUs = 250;
 constexpr size_t HistogramBuckets = 1000; // 0 - 250 ms, plus one overflow bucket
+constexpr u32 LongFrameEventUs = 100'000;
+constexpr u32 MaxLongFrameEvents = 100;
+
+// Frame pacing buckets (upper bounds in microseconds). The 12-20 and 28-38 ms buckets hold
+// frames quantized to one and two 60 Hz refresh intervals.
+constexpr std::array<std::pair<std::string_view, u32>, 6> PACING_BUCKETS{{
+    {"lt_12ms", 12'000},
+    {"12_20ms", 20'000},
+    {"20_28ms", 28'000},
+    {"28_38ms", 38'000},
+    {"38_55ms", 55'000},
+    {"ge_55ms", UINT32_MAX},
+}};
 
 struct TimerStat {
     std::atomic<u64> count{};
@@ -123,6 +136,7 @@ struct State {
     u64 sample_index{};
 
     std::atomic<Stage> stage{Stage::Unknown};
+    std::atomic<u32> long_frame_events{};
 };
 
 State& GetState() {
@@ -221,6 +235,14 @@ json WindowFrameJson(std::vector<u32> intervals, u64 dropped) {
     out["over_50ms"] = count_over(50'000);
     out["over_100ms"] = count_over(100'000);
     out["over_2x_median"] = count_over(median * 2);
+    json pacing = json::object();
+    auto bucket_start = intervals.begin();
+    for (const auto& [name, upper] : PACING_BUCKETS) {
+        const auto bucket_end = std::lower_bound(bucket_start, intervals.end(), upper);
+        pacing[std::string{name}] = static_cast<u64>(bucket_end - bucket_start);
+        bucket_start = bucket_end;
+    }
+    out["pacing"] = std::move(pacing);
     return out;
 }
 
@@ -237,6 +259,20 @@ json SessionFrameJson(const FrameSession& session) {
     out["p999_ms"] = HistogramPercentileMs(session, 0.999);
     out["max_ms"] = static_cast<double>(session.max_us) / 1000.0;
     out["percentile_resolution_ms"] = static_cast<double>(HistogramBucketUs) / 1000.0;
+    std::array<u64, PACING_BUCKETS.size()> pacing_counts{};
+    for (size_t bucket = 0; bucket < session.histogram.size(); ++bucket) {
+        const auto lower_us = static_cast<u32>(bucket * HistogramBucketUs);
+        size_t index = 0;
+        while (index + 1 < PACING_BUCKETS.size() && lower_us >= PACING_BUCKETS[index].second) {
+            ++index;
+        }
+        pacing_counts[index] += session.histogram[bucket];
+    }
+    json pacing = json::object();
+    for (size_t i = 0; i < PACING_BUCKETS.size(); ++i) {
+        pacing[std::string{PACING_BUCKETS[i].first}] = pacing_counts[i];
+    }
+    out["pacing"] = std::move(pacing);
     return out;
 }
 
@@ -327,6 +363,7 @@ json SummaryObject(State& state) {
 }
 
 void ResetCaptureData(State& state) {
+    state.long_frame_events.store(0, std::memory_order_relaxed);
     for (auto& timer : state.window_timers) {
         timer.Reset();
     }
@@ -347,6 +384,16 @@ void ResetCaptureData(State& state) {
     for (auto& session : state.frame_sessions) {
         session = FrameSession{};
     }
+}
+
+void RecordLongFrame(FrameSeries series, u32 us) {
+    auto& state = GetState();
+    if (state.long_frame_events.fetch_add(1, std::memory_order_relaxed) >= MaxLongFrameEvents) {
+        return;
+    }
+    RecordEvent(Severity::Info, "frame", "long_frame",
+                {{"series", std::string{SERIES_NAMES[static_cast<size_t>(series)]}},
+                 {"interval_ms", std::to_string(us / 1000)}});
 }
 
 } // Anonymous namespace
@@ -449,18 +496,24 @@ void RecordFrameInterval(FrameSeries series, std::chrono::nanoseconds interval) 
     }
     const auto us = us_count > UINT32_MAX ? UINT32_MAX : static_cast<u32>(us_count);
     auto& state = GetState();
-    std::scoped_lock lock{state.frames_mutex};
-    auto& window = state.frame_windows[static_cast<size_t>(series)];
-    if (window.intervals_us.size() < MaxWindowFrames) {
-        window.intervals_us.push_back(us);
-    } else {
-        ++window.dropped;
+    {
+        std::scoped_lock lock{state.frames_mutex};
+        auto& window = state.frame_windows[static_cast<size_t>(series)];
+        if (window.intervals_us.size() < MaxWindowFrames) {
+            window.intervals_us.push_back(us);
+        } else {
+            ++window.dropped;
+        }
+        auto& session = state.frame_sessions[static_cast<size_t>(series)];
+        session
+            .histogram[(std::min)(static_cast<size_t>(us / HistogramBucketUs), HistogramBuckets)]++;
+        ++session.count;
+        session.total_us += us;
+        session.max_us = (std::max)(session.max_us, us);
     }
-    auto& session = state.frame_sessions[static_cast<size_t>(series)];
-    session.histogram[(std::min)(static_cast<size_t>(us / HistogramBucketUs), HistogramBuckets)]++;
-    ++session.count;
-    session.total_us += us;
-    session.max_us = (std::max)(session.max_us, us);
+    if (us >= LongFrameEventUs) {
+        RecordLongFrame(series, us);
+    }
 }
 
 void RecordEvent(Severity severity, std::string_view category, std::string_view name,

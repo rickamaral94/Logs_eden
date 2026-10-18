@@ -213,3 +213,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | --- | --- |
 | 1 | Initial format |
 | 1 (additive) | `hitches`; `sampler_cost_breakdown_ms` per sample; `level_name` on `trim_memory` events; `slow_graphics_pipeline_create` / `slow_compute_pipeline_create` native events (driver creation ≥ 250 ms, with the shader or pipeline hash); `availability` now also records `available`, so mixed results read `intermittent` |
+| 1 (additive) | `pacing` buckets (`lt_12ms`, `12_20ms`, `20_28ms`, `28_38ms`, `38_55ms`, `ge_55ms`) per window and per session frame series; `long_frame` native events (interval ≥ 100 ms, at most 100 per capture) with the exact time of each long frame |

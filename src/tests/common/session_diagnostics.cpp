@@ -80,7 +80,8 @@ TEST_CASE("SessionDiagnostics: frame interval percentiles", "[common]") {
     RecordFrameInterval(FrameSeries::GuestPresent, 40ms);
     RecordFrameInterval(FrameSeries::GuestPresent, 120ms);
 
-    const json frames = json::parse(TakeSampleJson())["frames"]["guest_present_interval"];
+    const json sample = json::parse(TakeSampleJson());
+    const json frames = sample["frames"]["guest_present_interval"];
     REQUIRE(frames["count"] == 100);
     REQUIRE(frames["p50_ms"] == 16.0);
     REQUIRE(frames["p99_ms"] == 40.0);
@@ -89,12 +90,43 @@ TEST_CASE("SessionDiagnostics: frame interval percentiles", "[common]") {
     REQUIRE(frames["over_50ms"] == 1);
     REQUIRE(frames["over_100ms"] == 1);
     REQUIRE(frames["over_2x_median"] == 2);
+    REQUIRE(frames["pacing"]["12_20ms"] == 98);
+    REQUIRE(frames["pacing"]["38_55ms"] == 1);
+    REQUIRE(frames["pacing"]["ge_55ms"] == 1);
+    REQUIRE(frames["pacing"]["28_38ms"] == 0);
+
+    // Only the 120 ms frame crosses the long-frame threshold.
+    size_t long_frames = 0;
+    for (const auto& event : sample["events"]) {
+        if (event["name"] == "long_frame") {
+            ++long_frames;
+            REQUIRE(event["fields"]["interval_ms"] == "120");
+        }
+    }
+    REQUIRE(long_frames == 1);
 
     const json session = json::parse(SessionSummaryJson())["frames"]["guest_present_interval"];
     REQUIRE(session["count"] == 100);
     // Histogram percentiles report the upper bound of a 0.25 ms bucket.
     REQUIRE(session["p50_ms"] == 16.25);
     REQUIRE(session["max_ms"] == 120.0);
+    REQUIRE(session["pacing"]["12_20ms"] == 98);
+    REQUIRE(session["pacing"]["38_55ms"] == 1);
+    REQUIRE(session["pacing"]["ge_55ms"] == 1);
+    StopCapture();
+}
+
+TEST_CASE("SessionDiagnostics: long frame events are capped per capture", "[common]") {
+    FreshCapture();
+    for (int i = 0; i < 150; ++i) {
+        RecordFrameInterval(FrameSeries::HostPresent, std::chrono::milliseconds(200 + i));
+    }
+    size_t long_frames = 0;
+    const json sample = json::parse(TakeSampleJson());
+    for (const auto& event : sample["events"]) {
+        long_frames += event["name"] == "long_frame" ? 1 : 0;
+    }
+    REQUIRE(long_frames == 100);
     StopCapture();
 }
 

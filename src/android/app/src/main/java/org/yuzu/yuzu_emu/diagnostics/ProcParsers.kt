@@ -13,14 +13,16 @@ data class ThreadCpuStat(
 
 object ProcParsers {
     /**
-     * Parses a /proc/<pid>/task/<tid>/stat line. The thread name is taken from the separate
-     * comm file because the name inside the parentheses may itself contain spaces or ')'.
+     * Parses a /proc/<pid>/task/<tid>/stat line. The thread name is the same 15-character comm
+     * value, read between the first '(' and the last ')' because it may contain spaces or ')'.
      */
-    fun parseThreadStat(raw: String, name: String): ThreadCpuStat? {
+    fun parseThreadStat(raw: String): ThreadCpuStat? {
+        val nameStart = raw.indexOf('(')
         val nameEnd = raw.lastIndexOf(')')
-        if (nameEnd <= 0 || nameEnd + 2 >= raw.length) {
+        if (nameStart < 0 || nameEnd <= nameStart || nameEnd + 2 >= raw.length) {
             return null
         }
+        val name = raw.substring(nameStart + 1, nameEnd)
         val tid = raw.substringBefore(' ').trim().toIntOrNull() ?: return null
         // Fields after the name start at field 3 (state); utime and stime are fields 14 and 15,
         // processor (last CPU) is field 39.

@@ -15,17 +15,17 @@ class ProcParsersTest {
 
     @Test
     fun parsesThreadTicksAndLastCpu() {
-        val parsed = ProcParsers.parseThreadStat(stat, "CPUCore_0\n")!!
+        val parsed = ProcParsers.parseThreadStat(stat)!!
         assertEquals(4242, parsed.tid)
-        assertEquals("CPUCore_0", parsed.name)
+        assertEquals("Weird ) name", parsed.name)
         assertEquals(325L, parsed.ticks)
         assertEquals(6, parsed.lastCpu)
     }
 
     @Test
     fun rejectsMalformedStat() {
-        assertNull(ProcParsers.parseThreadStat("garbage", "x"))
-        assertNull(ProcParsers.parseThreadStat("12 (a) S 1", "x"))
+        assertNull(ProcParsers.parseThreadStat("garbage"))
+        assertNull(ProcParsers.parseThreadStat("12 (a) S 1"))
     }
 
     @Test

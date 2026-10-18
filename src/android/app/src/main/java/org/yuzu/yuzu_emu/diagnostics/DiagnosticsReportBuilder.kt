@@ -624,6 +624,7 @@ class DiagnosticsReportBuilder(
                 "Guest frame interval p50/p90/p99/max ms: ${frames.str("p50_ms")} / " +
                     "${frames.str("p90_ms")} / ${frames.str("p99_ms")} / ${frames.str("max_ms")}"
             )
+            pacingLine(frames?.get("pacing")?.asObject())?.let { appendLine(it) }
             appendLine()
             appendLine("== Shaders / pipelines ==")
             appendLine(
@@ -705,6 +706,22 @@ class DiagnosticsReportBuilder(
             appendLine()
             appendLine("Times in this report are CPU-side measurements unless stated otherwise;")
             appendLine("they are not GPU execution times.")
+        }
+    }
+
+    /** Share of guest frames per interval bucket, e.g. to spot alternating 16/33 ms pacing. */
+    private fun pacingLine(pacing: JsonObject?): String? {
+        if (pacing == null) {
+            return null
+        }
+        val counts = pacing.mapValues { it.value.num() ?: 0.0 }
+        val total = counts.values.sum()
+        if (total <= 0) {
+            return null
+        }
+        return "Guest frame pacing: " + counts.entries.joinToString(", ") { (name, count) ->
+            val label = name.replace("lt_", "<").replace("ge_", ">=").replace('_', '-')
+            "$label ${String.format(Locale.ROOT, "%.1f", count * 100.0 / total)}%"
         }
     }
 
