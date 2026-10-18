@@ -108,6 +108,7 @@ struct ThreadWait {
 struct FrameWindow {
     std::vector<u32> intervals_us;
     u64 dropped{};
+    u64 across_discontinuity{};
 };
 
 struct FrameSession {
@@ -170,6 +171,8 @@ struct State {
     std::atomic<u64> capture_seq{};
     std::atomic<u64> game_run{};
     std::atomic<u64> host_frame{};
+    std::atomic<s64> discontinuity_ns{};
+    std::array<std::atomic<u64>, SeriesCount> session_across_discontinuity{};
     std::atomic<bool> gpu_timestamps{true};
     std::atomic<bool> device_lost{};
     std::atomic<Stage> stage{Stage::Unknown};
@@ -210,8 +213,10 @@ constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
 constexpr size_t WaitReasonCount = static_cast<size_t>(WaitReason::Count);
 
 constexpr std::array<std::string_view, WaitReasonCount> WAIT_REASON_NAMES{
-    "unspecified",        "scheduler_finish", "guest_sync",   "swapchain_image",
-    "present_resources",  "descriptor_recycle", "buffer_recycle", "cache_sync",
+    "unspecified",      "scheduler_finish",   "guest_sync",
+    "swapchain_image",  "present_resources",  "descriptor_recycle",
+    "buffer_recycle",   "texture_download",   "buffer_download",
+    "buffer_write_sync",
 };
 
 // Upper bounds in microseconds of the fence wait distribution buckets.
@@ -275,8 +280,10 @@ double HistogramPercentileMs(const FrameSession& session, double p) {
     return static_cast<double>(session.max_us) / 1000.0;
 }
 
-json WindowFrameJson(std::vector<u32> intervals, u64 dropped) {
-    json out{{"count", intervals.size()}, {"dropped", dropped}};
+json WindowFrameJson(std::vector<u32> intervals, u64 dropped, u64 across_discontinuity) {
+    json out{{"count", intervals.size()},
+             {"dropped", dropped},
+             {"skipped_across_pause", across_discontinuity}};
     if (intervals.empty()) {
         return out;
     }
@@ -449,6 +456,8 @@ json SummaryObject(State& state) {
         std::scoped_lock lock{state.frames_mutex};
         for (size_t i = 0; i < SeriesCount; ++i) {
             frames[std::string{SERIES_NAMES[i]}] = SessionFrameJson(state.frame_sessions[i]);
+            frames[std::string{SERIES_NAMES[i]}]["skipped_across_pause"] =
+                state.session_across_discontinuity[i].load(std::memory_order_relaxed);
         }
     }
     json wait_threads;
@@ -496,6 +505,9 @@ json SummaryObject(State& state) {
 
 void ResetCaptureData(State& state) {
     state.long_frame_events.store(0, std::memory_order_relaxed);
+    for (auto& count : state.session_across_discontinuity) {
+        count.store(0, std::memory_order_relaxed);
+    }
     GpuTiming::Global().Reset();
     for (auto& timer : state.window_timers) {
         timer.Reset();
@@ -593,6 +605,8 @@ bool StartCapture(std::string session_dir) {
     state.session_dir = std::move(session_dir);
     state.capture_start_ms = MonotonicMs();
     state.capture_stop_ms = 0;
+    state.discontinuity_ns.store(std::chrono::steady_clock::now().time_since_epoch().count(),
+                                 std::memory_order_relaxed);
     state.last_sample_ms = state.capture_start_ms;
     state.sample_index = 0;
     Detail::g_capturing.store(true, std::memory_order_relaxed);
@@ -610,6 +624,12 @@ void StopCapture() {
 
 u64 CaptureSequence() noexcept {
     return GetState().capture_seq.load(std::memory_order_relaxed);
+}
+
+void NoteFrameDiscontinuity(std::string_view reason) {
+    GetState().discontinuity_ns.store(std::chrono::steady_clock::now().time_since_epoch().count(),
+                                      std::memory_order_relaxed);
+    RecordEvent(Severity::Info, "emulation", reason);
 }
 
 void SetGpuTimestampsEnabled(bool enabled) noexcept {
@@ -727,6 +747,16 @@ void RecordFrameInterval(FrameSeries series, std::chrono::nanoseconds interval) 
     }
     const auto us = us_count > UINT32_MAX ? UINT32_MAX : static_cast<u32>(us_count);
     auto& state = GetState();
+    const s64 interval_start =
+        std::chrono::steady_clock::now().time_since_epoch().count() -
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(interval).count();
+    if (interval_start < state.discontinuity_ns.load(std::memory_order_relaxed)) {
+        std::scoped_lock lock{state.frames_mutex};
+        ++state.frame_windows[static_cast<size_t>(series)].across_discontinuity;
+        state.session_across_discontinuity[static_cast<size_t>(series)].fetch_add(
+            1, std::memory_order_relaxed);
+        return;
+    }
     {
         std::scoped_lock lock{state.frames_mutex};
         auto& window = state.frame_windows[static_cast<size_t>(series)];
@@ -852,7 +882,8 @@ std::string TakeSampleJson() {
     json frames = json::object();
     for (size_t i = 0; i < SeriesCount; ++i) {
         frames[std::string{SERIES_NAMES[i]}] =
-            WindowFrameJson(std::move(windows[i].intervals_us), windows[i].dropped);
+            WindowFrameJson(std::move(windows[i].intervals_us), windows[i].dropped,
+                            windows[i].across_discontinuity);
     }
     out["frames"] = std::move(frames);
     out["gpu_timing"] = ParseOrString(GpuTiming::Global().TakeWindowJson());

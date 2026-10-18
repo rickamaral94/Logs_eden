@@ -49,6 +49,7 @@ extern "C" {
 #include "common/logging.h"
 #include "common/scm_rev.h"
 #include "common/scope_exit.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "common/string_util.h"
 #include "common/thread.h"
@@ -389,12 +390,14 @@ void EmulationSession::PauseEmulation() {
     std::scoped_lock lock(m_mutex);
     m_system.Pause();
     m_is_paused = true;
+    Common::Diagnostics::NoteFrameDiscontinuity("paused");
 }
 
 void EmulationSession::UnPauseEmulation() {
     std::scoped_lock lock(m_mutex);
     m_system.Run();
     m_is_paused = false;
+    Common::Diagnostics::NoteFrameDiscontinuity("resumed");
 }
 
 void EmulationSession::HaltEmulation() {

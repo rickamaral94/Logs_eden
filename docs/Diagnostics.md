@@ -189,11 +189,17 @@ reason.
   `unspecified`. Reasons: `scheduler_finish` (a `Scheduler::Finish` without a more specific
   reason), `guest_sync` (fence manager, guest syncpoints), `swapchain_image` (resources of the
   next swapchain image, i.e. frames in flight, including the pacing variants), `present_resources`
-  (present layer reuse/recreation), `descriptor_recycle`, `buffer_recycle`, `cache_sync`
-  (texture/buffer cache synchronization such as downloads). Each has count, total, max, mean and
+  (present layer reuse/recreation), `descriptor_recycle`, `buffer_recycle`,
+  `texture_download` (texture cache readbacks), `buffer_download` (buffer cache `Finish`:
+  downloads and synchronizing copies) and `buffer_write_sync` (waiting for pending GPU writes to
+  a buffer). Each has count, total, max, mean and
   a distribution (`lt_1ms` … `ge_33ms`). `fence_wait_by_thread` gives the same per thread name
   (at most 16, the rest as `other`). Scopes are inclusive: waits on different threads overlap and
   are not summed into a critical path.
+- Frame intervals that began before the capture started or before an emulation pause/resume
+  are not recorded; they are counted as `skipped_across_pause` and the pause and resume appear as
+  `emulation/paused` and `emulation/resumed` events. A 13.3 s "frame" that spanned the export
+  dialog between two device captures motivated this.
 - Presentation timers (CPU time inside the call): `swapchain_acquire_cpu`
   (`vkAcquireNextImageKHR`), `swapchain_present_cpu` (`vkQueuePresentKHR`),
   `present_queue_submit`, `frame_pacing_throttle` (sleep of the scheduler pacing limiter). No
@@ -408,3 +414,4 @@ confirmed or revised with five AB/BA pairs per level on the reference device.
 | 2 | `graphics_driver` split into `selected` (the schema 1 object) and `loaded`; `vulkan.device` adds `pipeline_cache_uuid`, `driver_version_vulkan_encoding`, `extensions_removed_by_eden`, `effective_paths`, `device_fault`; report `configuration_hashes` |
 | 2 (additive) | `process.thread_source` (`native` or `java`); threads are keyed by tid and start time so a reused tid is not compared with another thread; `vulkan.memory_budget_peak.note` |
 | 2 (additive) | counters `pipeline_feedback_valid`, `driver_pipeline_cache_hits`; `driver_cache` field on `slow_*_pipeline_create` events |
+| 2 | `cache_sync` wait reason split into `texture_download`, `buffer_download`, `buffer_write_sync`; frame series gain `skipped_across_pause`; `emulation/paused` and `emulation/resumed` events |

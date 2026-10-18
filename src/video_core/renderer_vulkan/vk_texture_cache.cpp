@@ -972,7 +972,7 @@ TextureCacheRuntime::TextureCacheRuntime(const Device& device_, Scheduler& sched
 }
 
 void TextureCacheRuntime::Finish() {
-    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::CacheSync};
+    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::TextureDownload};
     scheduler.Finish();
 }
 

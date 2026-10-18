@@ -430,12 +430,14 @@ bool BufferCacheRuntime::IsFree(u64 tick) {
 }
 
 void BufferCacheRuntime::Wait(u64 tick) {
-    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::CacheSync};
+    const Common::Diagnostics::ScopedWaitReason reason{
+        Common::Diagnostics::WaitReason::BufferWriteSync};
     scheduler.Wait(tick);
 }
 
 void BufferCacheRuntime::Finish() {
-    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::CacheSync};
+    const Common::Diagnostics::ScopedWaitReason reason{
+        Common::Diagnostics::WaitReason::BufferDownload};
     scheduler.Finish();
 }
 

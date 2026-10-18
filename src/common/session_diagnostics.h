@@ -68,7 +68,9 @@ enum class WaitReason : u8 {
     PresentResources,  ///< Present layer resources reused or recreated.
     DescriptorRecycle, ///< Descriptor buffer frame reuse or exhaustion.
     BufferRecycle,     ///< Ring/multi-range buffer reuse, quad index buffer growth.
-    CacheSync,         ///< Texture/buffer cache synchronization (downloads, readbacks).
+    TextureDownload,   ///< Texture cache waiting for image downloads (GPU to CPU readback).
+    BufferDownload,    ///< Buffer cache Finish: buffer downloads and synchronizing copies.
+    BufferWriteSync,   ///< Buffer cache waiting for pending GPU writes to a buffer.
     Count,
 };
 
@@ -126,6 +128,10 @@ void AdvanceHostFrame() noexcept;
 /// Set once a VK_ERROR_DEVICE_LOST was reported; GPU query results are no longer read.
 void MarkDeviceLost() noexcept;
 [[nodiscard]] bool DeviceLost() noexcept;
+
+/// Marks a break in frame pacing (capture start, emulation pause or resume). Frame intervals
+/// that began before the latest break are not recorded, so a pause is not reported as a frame.
+void NoteFrameDiscontinuity(std::string_view reason);
 
 /// Starts a new game run (one emulated title from boot to shutdown) and returns its id.
 u64 BeginGameRun() noexcept;

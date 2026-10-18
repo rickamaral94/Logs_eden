@@ -22,6 +22,8 @@ using namespace std::chrono_literals;
 void FreshCapture() {
     StopCapture();
     REQUIRE(StartCapture(""));
+    // Synthetic intervals end now; they must start after the capture began to be recorded.
+    std::this_thread::sleep_for(400ms);
     // Drain anything recorded by previous test cases.
     (void)TakeSampleJson();
 }
@@ -225,7 +227,7 @@ TEST_CASE("SessionDiagnostics: fence waits are split by reason and thread", "[co
     }
     REQUIRE(ScopedWaitReason::Current() == WaitReason::Unspecified);
     std::thread worker{[] {
-        ScopedWaitReason reason{WaitReason::CacheSync};
+        ScopedWaitReason reason{WaitReason::TextureDownload};
         RecordFenceWait(40ms);
     }};
     worker.join();
@@ -238,7 +240,7 @@ TEST_CASE("SessionDiagnostics: fence waits are split by reason and thread", "[co
     REQUIRE(reasons["swapchain_image"]["total_us"] == 20000);
     REQUIRE(reasons["swapchain_image"]["distribution"]["16_33ms"] == 1);
     REQUIRE(reasons["guest_sync"]["distribution"]["4_8ms"] == 1);
-    REQUIRE(reasons["cache_sync"]["distribution"]["ge_33ms"] == 1);
+    REQUIRE(reasons["texture_download"]["distribution"]["ge_33ms"] == 1);
     REQUIRE_FALSE(reasons.contains("present_resources"));
     u64 thread_waits = 0;
     for (const auto& [name, entry] : sample["fence_wait_by_thread"].items()) {
@@ -251,6 +253,33 @@ TEST_CASE("SessionDiagnostics: fence waits are split by reason and thread", "[co
     REQUIRE(json::parse(TakeSampleJson())["fence_wait_by_reason"].empty());
     const json summary = json::parse(SessionSummaryJson());
     REQUIRE(summary["fence_wait_by_reason"]["swapchain_image"]["count"] == 1);
+    StopCapture();
+}
+
+TEST_CASE("SessionDiagnostics: frames spanning a pause are not recorded", "[common]") {
+    FreshCapture();
+    RecordFrameInterval(FrameSeries::GuestPresent, 16ms);
+    NoteFrameDiscontinuity("paused");
+    std::this_thread::sleep_for(20ms);
+    NoteFrameDiscontinuity("resumed");
+    // The first frame after resuming covers the pause.
+    RecordFrameInterval(FrameSeries::GuestPresent, 13s);
+    std::this_thread::sleep_for(20ms);
+    RecordFrameInterval(FrameSeries::GuestPresent, 17ms);
+
+    const json sample = json::parse(TakeSampleJson());
+    const json frames = sample["frames"]["guest_present_interval"];
+    REQUIRE(frames["count"] == 2);
+    REQUIRE(frames["skipped_across_pause"] == 1);
+    REQUIRE(frames["max_ms"] == 17.0);
+    bool paused = false;
+    for (const auto& event : sample["events"]) {
+        paused |= event["category"] == "emulation" && event["name"] == "paused";
+        REQUIRE(event["name"] != "long_frame");
+    }
+    REQUIRE(paused);
+    const json session = json::parse(SessionSummaryJson());
+    REQUIRE(session["frames"]["guest_present_interval"]["skipped_across_pause"] == 1);
     StopCapture();
 }
 
