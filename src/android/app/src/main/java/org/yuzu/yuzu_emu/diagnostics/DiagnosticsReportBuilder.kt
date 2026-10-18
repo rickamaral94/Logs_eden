@@ -1257,6 +1257,11 @@ class DiagnosticsReportBuilder(
                 "Failures: create=${counters.str("pipeline_create_failed")} " +
                     "translate=${counters.str("shader_translate_failed")}"
             )
+            appendLine(
+                "Driver pipeline cache hits (creation feedback): " +
+                    "${counters.str("driver_pipeline_cache_hits")} of " +
+                    "${counters.str("pipeline_feedback_valid")} valid reports"
+            )
             SUMMARY_TIMERS.forEach { name ->
                 val t = timers?.get(name)?.asObject()
                 appendLine(

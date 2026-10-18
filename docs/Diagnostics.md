@@ -188,6 +188,12 @@ reason.
   with a pipeline), `indexed_draw_calls`, `indirect_draw_calls`, `compute_dispatches`,
   `render_passes`, `staging_upload_bytes`, `staging_download_bytes` (requested sizes). The report
   `workload.per_host_frame` divides them by host frames.
+- Pipeline creation feedback (Vulkan 1.3 devices, only while capturing): every runtime
+  pipeline creation chains `VkPipelineCreationFeedbackCreateInfo` for the whole pipeline (no
+  per-stage array). `pipeline_feedback_valid` counts reports with the valid bit and
+  `driver_pipeline_cache_hits` those with `APPLICATION_PIPELINE_CACHE_HIT`; slow creation events
+  carry `driver_cache` (`hit`, `miss`, `unknown`). The feedback is informational and does not
+  change the pipeline; the size of the driver cache file alone does not prove hits.
 - Not instrumented yet: Maxwell command processing and descriptor preparation timers, scheduler
   queue depth, flush reasons, triangle/index counts, barriers and layout transitions.
 
@@ -359,3 +365,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | 2 (additive) | `fence_wait_by_reason`, `fence_wait_by_thread` (samples and native summary); timers `swapchain_acquire_cpu`, `swapchain_present_cpu`, `frame_pacing_throttle`; counters `scheduler_submits`, `draw_calls`, `indexed_draw_calls`, `indirect_draw_calls`, `compute_dispatches`, `render_passes`, `staging_upload_bytes`, `staging_download_bytes`; report `cpu_waits`, `workload`; `vulkan.swapchain.present_mode_inputs`; `swapchain/recreate` events |
 | 2 | `graphics_driver` split into `selected` (the schema 1 object) and `loaded`; `vulkan.device` adds `pipeline_cache_uuid`, `driver_version_vulkan_encoding`, `extensions_removed_by_eden`, `effective_paths`, `device_fault`; report `configuration_hashes` |
 | 2 (additive) | `process.thread_source` (`native` or `java`); threads are keyed by tid and start time so a reused tid is not compared with another thread; `vulkan.memory_budget_peak.note` |
+| 2 (additive) | counters `pipeline_feedback_valid`, `driver_pipeline_cache_hits`; `driver_cache` field on `slow_*_pipeline_create` events |

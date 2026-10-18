@@ -204,6 +204,7 @@ constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
     "indexed_draw_calls",            "indirect_draw_calls",
     "compute_dispatches",            "render_passes",
     "staging_upload_bytes",          "staging_download_bytes",
+    "pipeline_feedback_valid",       "driver_pipeline_cache_hits",
 };
 
 constexpr size_t WaitReasonCount = static_cast<size_t>(WaitReason::Count);

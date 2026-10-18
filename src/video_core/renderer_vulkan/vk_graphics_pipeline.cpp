@@ -20,6 +20,7 @@
 #include "video_core/renderer_vulkan/pipeline_statistics.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
+#include "video_core/renderer_vulkan/vk_pipeline_feedback.h"
 #include "video_core/renderer_vulkan/vk_render_pass_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_texture_cache.h"
@@ -324,7 +325,8 @@ GraphicsPipeline::GraphicsPipeline(
                 Diag::RecordEvent(Diag::Severity::Warning, "pipeline",
                                   "slow_graphics_pipeline_create",
                                   {{"pipeline_hash", fmt::format("{:016x}", key.Hash())},
-                                   {"ms", std::to_string(ms.count())}});
+                                   {"ms", std::to_string(ms.count())},
+                                   {"driver_cache", std::string{driver_cache_feedback}}});
             }
         } catch (const vk::Exception& exception) {
             LOG_CRITICAL(Render_Vulkan, "Graphics pipeline build failed: {}", exception.what());
@@ -1090,9 +1092,10 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
         flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
     }
 
+    PipelineCreationFeedback feedback;
     pipeline = device.GetLogical().CreateGraphicsPipeline({
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-        .pNext = nullptr,
+        .pNext = feedback.Chain(device, nullptr),
         .flags = flags,
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
@@ -1111,6 +1114,7 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
         .basePipelineHandle = nullptr,
         .basePipelineIndex = 0,
     }, *pipeline_cache);
+    driver_cache_feedback = feedback.Record();
 
     // Log graphics pipeline creation
     if (GPU::Logging::IsActive()) {

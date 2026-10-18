@@ -923,6 +923,11 @@ FN_MAX_LIMIT_LIST
         return extensions.synchronization2;
     }
 
+    /// VkPipelineCreationFeedbackCreateInfo is core in Vulkan 1.3.
+    bool SupportsPipelineCreationFeedback() const {
+        return instance_version >= VK_API_VERSION_1_3;
+    }
+
     /// Returns the minimum supported version of SPIR-V.
     u32 SupportedSpirvVersion() const {
         if (instance_version >= VK_API_VERSION_1_3) {

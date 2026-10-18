@@ -16,6 +16,7 @@
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_descriptor_pool.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
+#include "video_core/renderer_vulkan/vk_pipeline_feedback.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_update_descriptor.h"
 #include "video_core/shader_notify.h"
@@ -93,9 +94,10 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
         if (uses_descriptor_buffer) {
             flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
         }
+        PipelineCreationFeedback feedback;
         const VkComputePipelineCreateInfo compute_ci{
             .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-            .pNext = nullptr,
+            .pNext = feedback.Chain(device, nullptr),
             .flags = flags,
             .stage{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -117,12 +119,14 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
             pipeline = device.GetLogical().CreateComputePipeline(compute_ci, *pipeline_cache);
             const auto elapsed = std::chrono::steady_clock::now() - create_start;
             Diag::AddTiming(Diag::Timer::ComputePipelineCreate, elapsed);
+            const std::string_view cache = feedback.Record();
             if (elapsed >= Diag::SlowPipelineThreshold) {
                 const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
                 Diag::RecordEvent(Diag::Severity::Warning, "pipeline",
                                   "slow_compute_pipeline_create",
                                   {{"shader_hash", fmt::format("{:016x}", shader_hash)},
-                                   {"ms", std::to_string(ms.count())}});
+                                   {"ms", std::to_string(ms.count())},
+                                   {"driver_cache", std::string{cache}}});
             }
         } catch (const vk::Exception& exception) {
             LOG_CRITICAL(Render_Vulkan, "Adreno rejected compute shader {:016X}: {}", shader_hash,

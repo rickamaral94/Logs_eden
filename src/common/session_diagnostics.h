@@ -53,6 +53,8 @@ enum class Counter : u32 {
     RenderPasses,               ///< Render passes begun by the scheduler.
     StagingUploadBytes,         ///< Bytes requested from the staging pool for uploads.
     StagingDownloadBytes,       ///< Bytes requested from the staging pool for downloads.
+    PipelineFeedbackValid,      ///< Runtime pipeline creations with valid creation feedback.
+    DriverPipelineCacheHits,    ///< ...of which the driver reported an application cache hit.
     Count,
 };
 

@@ -11,6 +11,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -185,6 +186,8 @@ private:
     std::condition_variable build_condvar;
     std::mutex build_mutex;
     std::atomic_bool is_built{false};
+    /// Driver cache result of the last build from creation feedback, for diagnostics.
+    std::string_view driver_cache_feedback{"unknown"};
     bool uses_push_descriptor{false};
     bool uses_descriptor_buffer{false};
 };
