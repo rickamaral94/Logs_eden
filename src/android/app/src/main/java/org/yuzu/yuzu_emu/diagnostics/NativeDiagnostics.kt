@@ -9,6 +9,9 @@ object NativeDiagnostics {
     external fun stopCapture()
     external fun isCapturing(): Boolean
 
+    /** Vulkan timestamp queries around scheduler submissions while capturing. */
+    external fun setGpuTimestampsEnabled(enabled: Boolean)
+
     /** Sequence of the current or last native capture in this process; events carry it. */
     external fun captureSequence(): Long
 

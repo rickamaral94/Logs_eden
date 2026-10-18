@@ -49,7 +49,8 @@ enum class CaptureLevel(val id: String, val intervalMs: Long) {
 data class CaptureOptions(
     val level: CaptureLevel = CaptureLevel.Standard,
     val stageNote: String = "",
-    val maxDurationMs: Long = 30L * 60L * 1000L
+    val maxDurationMs: Long = 30L * 60L * 1000L,
+    val gpuTimestamps: Boolean = true
 )
 
 sealed class CaptureState {
@@ -165,6 +166,7 @@ object DiagnosticsSession {
             put("interval_ms", options.level.intervalMs)
             put("max_duration_ms", options.maxDurationMs)
             put("stage_note", options.stageNote)
+            put("gpu_timestamps_enabled", options.gpuTimestamps)
             put("game_title", game?.title)
         }
         try {
@@ -197,6 +199,7 @@ object DiagnosticsSession {
             return "write_failed"
         }
 
+        runCatching { NativeDiagnostics.setGpuTimestampsEnabled(options.gpuTimestamps) }
         if (!NativeDiagnostics.startCapture(dir.absolutePath)) {
             dir.deleteRecursively()
             return "native_start_failed"

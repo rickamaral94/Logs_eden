@@ -128,6 +128,42 @@ native event ring hold all of them. Schema 2 ties every piece of data to its cap
   `game_exit`, `capture_limit_reached`, `vk_error_device_lost`, `process_ended:<category>` and
   `unknown`, with the evidence used.
 
+## GPU time (Vulkan timestamps)
+
+On by default during a capture (checkbox "Measure GPU time" in the capture dialog), off outside
+captures. Support is checked on the device actually created: `timestampValidBits` of the
+graphics queue family and `timestampPeriod`; otherwise `gpu_timing.available` is false with the
+reason.
+
+- What is measured: each scheduler submission (upload + main command buffer, one
+  `vkQueueSubmit`) gets a `TOP_OF_PIPE` timestamp at the start of the upload command buffer and a
+  `BOTTOM_OF_PIPE` timestamp at the end of the main command buffer. The two queries are reset with
+  `vkCmdResetQueryPool` in the same submission, before the writes and outside any render pass, so
+  `host_query_reset` is not needed. The present blit (`PresentManager`, own command buffers) is
+  not measured.
+- No waits: results are read with `VK_QUERY_RESULT_64_BIT | WITH_AVAILABILITY` (never `WAIT`) on
+  the scheduler worker thread, only for ticks the existing fence/timeline tracking already
+  reports as complete. No submits, fences, barriers or idle waits are added. A ring of 256 slots
+  is never reset while a slot is in flight; when it is full the submission is counted as
+  unmeasured (`dropped_ring_full`). Results unavailable after 64 polls count as
+  `dropped_unavailable`; on device loss pending results are dropped (`dropped_lost`).
+- Conversion: differences use only `timestampValidBits` (48 on Adreno 740/Turnip), masked, so
+  wraparound is handled; ticks are multiplied by `timestampPeriod`. GPU timestamps are never
+  subtracted from CPU clocks (no calibration is used).
+- Per window (`samples[].native.gpu_timing`): submissions, measured, results, `coverage_pct`,
+  pending, drops, `submit_sum_ms` (sum of submission intervals: counts overlap twice and includes
+  idle time inside command buffers), `submit_busy_union_ms` (union of the intervals), per-submit
+  distribution, `frame_gpu` distribution, `frames_complete`/`frames_partial`,
+  `instrumentation_cpu_ms` (CPU time spent recording and reading queries).
+- Per frame: `frame_gpu` is the union of the submissions attributed to one host frame (the
+  host frame counter at submit time) and is only computed for frames whose submissions were all
+  measured; other frames count as `frames_partial`. Session percentiles come from a 0.25 ms
+  histogram (merged, not averaged per window).
+- Not: GPU utilization, the frame's critical path or display latency. `gpu_timing.cemu_aliases`
+  maps `gpuTimePerFrameMs` (frame p50) and `gpuCoveragePct` for comparison with Cemu reports.
+- Cost per submission: one query reset, two timestamp writes, and on read one
+  `vkGetQueryPoolResults` for two queries.
+
 ## Report schema (version 2)
 
 Field names are stable. Additive changes keep `schema_version`; renaming or removing a field, or
@@ -158,6 +194,7 @@ Top-level fields of `report.json`:
 | `native_summary` | Session totals: `timers`, `counters`, `frames` with histogram percentiles |
 | `android_summary` | Aggregates of Android samples (avg/min/max), GC totals, sampler cost |
 | `frame_rate` | Guest present, host present and game FPS averaged over the capture |
+| `gpu_timing` | See [GPU time](#gpu-time-vulkan-timestamps) |
 | `markers` | User markers with `context` built from samples within -10 s / +5 s |
 | `hitches` | Up to 10 sample windows whose longest guest frame interval exceeds 100 ms, with the timers, counters, shader queue, CPU/GPU load and native events of the same window (correlation only) |
 | `events.native` | Native events of this capture (Vulkan check failures, device loss, pipeline/shader failures, long frames, markers) |
@@ -268,3 +305,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | 1 (additive) | `pacing` buckets (`lt_12ms`, `12_20ms`, `20_28ms`, `28_38ms`, `38_55ms`, `ge_55ms`) per window and per session frame series; `long_frame` native events (interval ≥ 100 ms, at most 100 per capture) with the exact time of each long frame |
 | 1 (additive) | `system.gpu_max_clock_mhz_kgsl`, `system.gpu_min_clock_mhz_kgsl` per sample; `gpu_busy_pct_kgsl`, `gpu_clock_mhz_kgsl` and `gpu_max_clock_mhz_kgsl` statistics in `android_summary`; `gpu_clock_mhz_kgsl` in `hitches`. The Eden log is flushed before export, so the bundled log now includes its newest lines |
 | 2 | Capture scoping: `events.native` holds only this capture (schema 1 mixed earlier captures in and kept `during_capture=true` for them), new `events.native_context`/`native_scope`; `identity`, `session_end`, `identity_changes`, `log_coverage`, `log_digest`, `manifest.json`; identity fields frozen at capture start; `exit_reasons` gain `pid`, `category`, `relation`; `native_summary.capturing` is false and `duration_ms` final after stop; `logs/eden_log.txt` holds the capture's lines instead of the file tail; `serial_unit`/`serial_battery` removed |
+| 2 (additive) | `gpu_timing` (report), `native_summary.gpu_timing`, `samples[].native.gpu_timing`; `frame_gpu_max_ms` in `hitches`; `session.gpu_timestamps_enabled`; `device_lost` events carry `host_frame_id` and `game_run_id` |

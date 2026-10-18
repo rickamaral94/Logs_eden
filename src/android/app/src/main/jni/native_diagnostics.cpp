@@ -156,6 +156,11 @@ void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_flushLog(JNIEnv* env,
     Common::Log::Flush();
 }
 
+void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_setGpuTimestampsEnabled(
+    JNIEnv* env, jobject obj, jboolean enabled) {
+    Diag::SetGpuTimestampsEnabled(enabled != JNI_FALSE);
+}
+
 jlong Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_captureSequence(JNIEnv* env,
                                                                            jobject obj) {
     return static_cast<jlong>(Diag::CaptureSequence());

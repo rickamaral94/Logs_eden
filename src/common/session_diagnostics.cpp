@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "common/diagnostics_gpu_timing.h"
 #include "common/session_diagnostics.h"
 
 namespace Common::Diagnostics {
@@ -140,6 +141,9 @@ struct State {
 
     std::atomic<u64> capture_seq{};
     std::atomic<u64> game_run{};
+    std::atomic<u64> host_frame{};
+    std::atomic<bool> gpu_timestamps{true};
+    std::atomic<bool> device_lost{};
     std::atomic<Stage> stage{Stage::Unknown};
     std::atomic<u32> long_frame_events{};
 };
@@ -377,11 +381,13 @@ json SummaryObject(State& state) {
         {"timers", std::move(timers)},
         {"counters", std::move(counters)},
         {"frames", std::move(frames)},
+        {"gpu_timing", ParseOrString(GpuTiming::Global().SessionJson())},
     };
 }
 
 void ResetCaptureData(State& state) {
     state.long_frame_events.store(0, std::memory_order_relaxed);
+    GpuTiming::Global().Reset();
     for (auto& timer : state.window_timers) {
         timer.Reset();
     }
@@ -484,6 +490,30 @@ void StopCapture() {
 
 u64 CaptureSequence() noexcept {
     return GetState().capture_seq.load(std::memory_order_relaxed);
+}
+
+void SetGpuTimestampsEnabled(bool enabled) noexcept {
+    GetState().gpu_timestamps.store(enabled, std::memory_order_relaxed);
+}
+
+bool GpuTimestampsEnabled() noexcept {
+    return GetState().gpu_timestamps.load(std::memory_order_relaxed);
+}
+
+void AdvanceHostFrame() noexcept {
+    GetState().host_frame.fetch_add(1, std::memory_order_relaxed);
+}
+
+u64 HostFrameId() noexcept {
+    return GetState().host_frame.load(std::memory_order_relaxed);
+}
+
+void MarkDeviceLost() noexcept {
+    GetState().device_lost.store(true, std::memory_order_relaxed);
+}
+
+bool DeviceLost() noexcept {
+    return GetState().device_lost.load(std::memory_order_relaxed);
 }
 
 u64 BeginGameRun() noexcept {
@@ -656,6 +686,7 @@ std::string TakeSampleJson() {
             WindowFrameJson(std::move(windows[i].intervals_us), windows[i].dropped);
     }
     out["frames"] = std::move(frames);
+    out["gpu_timing"] = ParseOrString(GpuTiming::Global().TakeWindowJson());
 
     json samplers = json::object();
     {

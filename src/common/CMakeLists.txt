@@ -42,6 +42,8 @@ add_library(
     demangle.h
     device_power_state.cpp
     device_power_state.h
+    diagnostics_gpu_timing.cpp
+    diagnostics_gpu_timing.h
     div_ceil.h
     dynamic_library.cpp
     dynamic_library.h

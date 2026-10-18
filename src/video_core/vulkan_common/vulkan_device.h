@@ -308,6 +308,11 @@ public:
         return properties.properties.apiVersion;
     }
 
+    /// Nanoseconds per timestamp query tick.
+    float GetTimestampPeriod() const {
+        return properties.properties.limits.timestampPeriod;
+    }
+
     /// Returns the current driver version provided in Vulkan-formatted version numbers.
     u32 GetDriverVersion() const {
         return properties.properties.driverVersion;

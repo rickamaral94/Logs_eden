@@ -50,6 +50,8 @@ class DiagnosticsReportBuilderTest {
         File(session, DiagnosticsSchema.STATIC_END_FILE).writeText(
             """{"native_summary":{"frames":{"guest_present_interval":{"count":10,"p99_ms":40.0}},
               "counters":{"graphics_pipeline_cache_miss":3},"timers":{},"capture_seq":2,
+              "gpu_timing":{"available":true,"coverage_pct":98.5,"frames_complete":170,
+                "frames_partial":3,"frame_gpu":{"count":170,"p50_ms":12.5,"p99_ms":21.0}},
               "capture_start_mono_ms":1000,"capture_stop_mono_ms":7000,"capturing":false},
             "native":{"build":{"version":"v0"},"cpu_backend":"NCE","settings":[],
               "sections":{"vulkan_device":{"device_name":"GPU X","api_version":"1.3.0"},
@@ -64,6 +66,7 @@ class DiagnosticsReportBuilderTest {
               "host_present_interval":{"count":60}},
               "counters":{"game_frames":30,"graphics_pipeline_cache_miss":${if (i == 2) 3 else 0}},
               "timers":{"pipeline_build_wait":{"count":1,"total_us":${i * 1000},"max_us":${i * 1000}}},
+              "gpu_timing":{"available":true,"submit_busy_union_ms":${i * 500}},
               "samplers":{"vulkan_memory_budget":{"available":true,"heaps":[{"index":0,"usage_bytes":${i * 100},"budget_bytes":1000}]}}},
             "android":{"process":{"cpu_pct_of_one_core":${100 + i},"memory":{"rss_kb":${1000 * i},"rss_peak_kb":${1000 * i}},
               "thread_categories":{"emu_cpu":80.0},"gc":{"gc_count":1}},
@@ -303,6 +306,27 @@ class DiagnosticsReportBuilderTest {
             "user_stopped_capture",
             plan.report["session_end"]!!.jsonObject["classification"]!!.jsonPrimitive.content
         )
+    }
+
+    @Test
+    fun gpuTimingKeepsItsSemanticsAndAliases() {
+        val plan = build()
+        val gpu = plan.report["gpu_timing"]!!.jsonObject
+        assertEquals("true", gpu["available"]!!.jsonPrimitive.content)
+        assertTrue(gpu["semantics"]!!.jsonPrimitive.content.contains("Not GPU utilization"))
+        val aliases = gpu["cemu_aliases"]!!.jsonObject
+        assertEquals("12.5", aliases["gpuTimePerFrameMs"]!!.jsonPrimitive.content)
+        assertEquals("98.5", aliases["gpuCoveragePct"]!!.jsonPrimitive.content)
+        val busy = gpu["submit_busy_union_pct_of_window"]!!.jsonObject
+        assertEquals(75.0, busy["max"]!!.jsonPrimitive.content.toDouble(), 0.001)
+        assertTrue(plan.summary.contains("Frame GPU time p50/p90/p99/max ms: 12.5"))
+    }
+
+    @Test
+    fun gpuTimingUnavailableIsExplicit() {
+        File(session, DiagnosticsSchema.STATIC_END_FILE).delete()
+        val gpu = build().report["gpu_timing"]!!.jsonObject
+        assertEquals("false", gpu["available"]!!.jsonPrimitive.content)
     }
 
     @Test

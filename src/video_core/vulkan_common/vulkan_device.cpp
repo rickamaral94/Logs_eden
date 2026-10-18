@@ -899,9 +899,13 @@ VkFormat Device::GetSupportedFormat(VkFormat wanted_format, VkFormatFeatureFlags
 
 void Device::ReportLoss() const {
     LOG_CRITICAL(Render_Vulkan, "Device loss occurred!");
+    Common::Diagnostics::MarkDeviceLost();
     Common::Diagnostics::RecordEvent(
         Common::Diagnostics::Severity::Critical, "vulkan", "device_lost",
-        {{"device", std::string{GetModelName()}}, {"driver", GetDriverName()}});
+        {{"device", std::string{GetModelName()}},
+         {"driver", GetDriverName()},
+         {"host_frame_id", std::to_string(Common::Diagnostics::HostFrameId())},
+         {"game_run_id", std::to_string(Common::Diagnostics::GameRunId())}});
     Common::Diagnostics::WriteCriticalMarker("vulkan_device_lost");
 
     // Wait for the log to flush and for Nsight Aftermath to dump the results

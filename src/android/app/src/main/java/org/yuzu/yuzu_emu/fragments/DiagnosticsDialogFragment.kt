@@ -115,7 +115,8 @@ class DiagnosticsDialogFragment : DialogFragment() {
                 } else {
                     CaptureLevel.Standard
                 },
-                stageNote = binding.editStage.text?.toString().orEmpty()
+                stageNote = binding.editStage.text?.toString().orEmpty(),
+                gpuTimestamps = binding.checkGpuTimestamps.isChecked
             )
             val error = withContext(Dispatchers.IO) {
                 DiagnosticsSession.start(context, options, game)

@@ -88,6 +88,18 @@ void StopCapture();
 /// Every event carries the sequence of the capture that was active when it was recorded.
 [[nodiscard]] u64 CaptureSequence() noexcept;
 
+/// Vulkan timestamp queries around scheduler submissions during a capture (on by default).
+void SetGpuTimestampsEnabled(bool enabled) noexcept;
+[[nodiscard]] bool GpuTimestampsEnabled() noexcept;
+
+/// Counts host frames handed to presentation; GPU timings are attributed to this id.
+void AdvanceHostFrame() noexcept;
+[[nodiscard]] u64 HostFrameId() noexcept;
+
+/// Set once a VK_ERROR_DEVICE_LOST was reported; GPU query results are no longer read.
+void MarkDeviceLost() noexcept;
+[[nodiscard]] bool DeviceLost() noexcept;
+
 /// Starts a new game run (one emulated title from boot to shutdown) and returns its id.
 u64 BeginGameRun() noexcept;
 [[nodiscard]] u64 GameRunId() noexcept;

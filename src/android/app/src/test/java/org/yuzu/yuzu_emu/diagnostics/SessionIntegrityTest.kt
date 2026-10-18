@@ -78,7 +78,7 @@ class SessionIntegrityTest {
         assertEquals("user_stopped_capture", classify("user"))
         assertEquals("game_exit", classify("emulation_stopped"))
         assertEquals("capture_limit_reached", classify("duration_limit"))
-        assertEquals("vk_error_device_lost", classify("user", listOf("device_lost")))
+        assertEquals("vk_error_device_lost", classify("user", listOf("vulkan_device_lost")))
         assertEquals("process_ended:unknown", classify("process_ended_during_capture"))
     }
 

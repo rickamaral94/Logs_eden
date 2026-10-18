@@ -943,6 +943,7 @@
     <string name="diagnostics_level_standard">Padrão (a cada 2 s, baixo impacto)</string>
     <string name="diagnostics_level_detailed">Detalhado (a cada 1 s, inclui PSS)</string>
     <string name="diagnostics_stage_hint">Em que parte do jogo você está? (opcional)</string>
+    <string name="diagnostics_gpu_timestamps">Medir tempo de GPU (timestamps Vulkan)</string>
     <string name="diagnostics_local_notice">As capturas ficam neste aparelho. Nada é enviado a lugar nenhum, a menos que você mesmo exporte e compartilhe um pacote. A captura para após 30 minutos.</string>
     <string name="diagnostics_start">Iniciar captura</string>
     <string name="diagnostics_stop">Encerrar captura</string>

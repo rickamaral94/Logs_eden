@@ -18,6 +18,7 @@
 #include "common/thread.h"
 #include "video_core/gpu_logging/gpu_logging.h"
 #include "video_core/renderer_vulkan/vk_command_pool.h"
+#include "video_core/renderer_vulkan/vk_gpu_timestamps.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -46,7 +47,8 @@ void Scheduler::CommandChunk::ExecuteAll(vk::CommandBuffer cmdbuf,
 Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
     : device{device_}, state_tracker{state_tracker_},
       master_semaphore{std::make_unique<MasterSemaphore>(device)},
-      command_pool{std::make_unique<CommandPool>(*master_semaphore, device)} {
+      command_pool{std::make_unique<CommandPool>(*master_semaphore, device)},
+      gpu_timestamps{std::make_unique<GpuTimestamps>(device)} {
 
     AcquireNewChunk();
     AllocateWorkerCommandBuffer();
@@ -338,6 +340,7 @@ void Scheduler::AllocateWorkerCommandBuffer() {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr,
     });
+    gpu_timestamps->BeginSubmission(current_upload_cmdbuf);
 }
 
 u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
@@ -354,6 +357,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
         };
         upload_cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, WRITE_BARRIER);
+        gpu_timestamps->EndSubmission(cmdbuf, signal_value);
         upload_cmdbuf.End();
         cmdbuf.End();
 
@@ -367,6 +371,9 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             return master_semaphore->SubmitQueue(cmdbuf, upload_cmdbuf, signal_semaphore,
                                                  wait_semaphore, signal_value);
         }();
+        if (submit_result == VK_SUCCESS) {
+            gpu_timestamps->Poll(master_semaphore->KnownGpuTick());
+        }
         switch (const VkResult result = submit_result) {
         case VK_SUCCESS:
             // Log successful queue submission

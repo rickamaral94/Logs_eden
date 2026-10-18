@@ -31,6 +31,7 @@ namespace Vulkan {
 class CommandPool;
 class Device;
 class Framebuffer;
+class GpuTimestamps;
 class GraphicsPipeline;
 class StateTracker;
 
@@ -300,6 +301,7 @@ private:
 
     std::unique_ptr<MasterSemaphore> master_semaphore;
     std::unique_ptr<CommandPool> command_pool;
+    std::unique_ptr<GpuTimestamps> gpu_timestamps;
 
     VideoCommon::QueryCacheBase<QueryCacheParams>* query_cache = nullptr;
 

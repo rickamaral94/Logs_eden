@@ -1895,6 +1895,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     <string name="diagnostics_level_standard">Standard (every 2 s, low overhead)</string>
     <string name="diagnostics_level_detailed">Detailed (every 1 s, includes PSS)</string>
     <string name="diagnostics_stage_hint">Where are you in the game? (optional)</string>
+    <string name="diagnostics_gpu_timestamps">Measure GPU time (Vulkan timestamps)</string>
     <string name="diagnostics_local_notice">Captures stay on this device. Nothing is sent anywhere unless you export and share a bundle yourself. Captures stop after 30 minutes.</string>
     <string name="diagnostics_start">Start capture</string>
     <string name="diagnostics_stop">Stop capture</string>

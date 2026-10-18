@@ -213,6 +213,7 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
         render_window.OnFrameDisplayed();
     };
 
+    Common::Diagnostics::AdvanceHostFrame();
     if (Common::Diagnostics::IsCapturing()) {
         const auto now = std::chrono::steady_clock::now();
         if (last_composite_time.time_since_epoch().count() != 0) {

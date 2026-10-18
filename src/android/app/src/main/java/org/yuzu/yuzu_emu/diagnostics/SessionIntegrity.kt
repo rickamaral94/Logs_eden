@@ -107,7 +107,8 @@ object SessionIntegrity {
         val captureExit = (linkedExits as? JsonArray)?.mapNotNull { it.asObject() }
             ?.firstOrNull { it.str("relation") == "capture_process" }
         val (classification, evidence) = when {
-            criticalReasons.contains("device_lost") ->
+            // Native markers are named "vulkan_device_lost".
+            criticalReasons.any { it.contains("device_lost") } ->
                 "vk_error_device_lost" to "native critical marker"
             endReason == "user" -> "user_stopped_capture" to "session end_reason"
             endReason == "emulation_stopped" -> "game_exit" to "session end_reason"

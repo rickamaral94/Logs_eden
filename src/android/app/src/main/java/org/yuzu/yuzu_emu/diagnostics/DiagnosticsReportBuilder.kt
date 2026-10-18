@@ -183,6 +183,7 @@ class DiagnosticsReportBuilder(
             put("native_summary", nativeSummary)
             put("android_summary", androidSummary(captureSamples))
             put("frame_rate", frameRate(captureSamples))
+            put("gpu_timing", gpuTiming(nativeSummary.asObject(), captureSamples))
             put("hitches", hitches(captureSamples))
             put(
                 "markers",
@@ -597,6 +598,10 @@ class DiagnosticsReportBuilder(
                 )
                 put("pipeline_build_wait_max_ms", timerMaxMs("pipeline_build_wait"))
                 put("fence_wait_max_ms", timerMaxMs("fence_wait"))
+                put(
+                    "frame_gpu_max_ms",
+                    native["gpu_timing"]?.asObject()?.get("frame_gpu")?.asObject().num("max_ms")
+                )
                 put("queue_submit_max_ms", timerMaxMs("queue_submit"))
                 put("graphics_pipeline_create_max_ms", timerMaxMs("graphics_pipeline_create"))
                 put("compute_pipeline_create_max_ms", timerMaxMs("compute_pipeline_create"))
@@ -642,6 +647,61 @@ class DiagnosticsReportBuilder(
             put("windows_over_threshold", windows.size)
             put("windows", JsonArray(top))
             put("note", "longest windows by guest frame interval; metrics of the same window")
+        }
+    }
+
+    /**
+     * GPU execution time from Vulkan timestamps. frame_gpu is the union of the measured
+     * scheduler submission intervals of one host frame; it can include GPU idle time inside a
+     * command buffer and excludes the present blit, so it is neither GPU utilization nor
+     * presentation latency.
+     */
+    private fun gpuTiming(summary: JsonObject?, samples: List<JsonObject>): JsonObject {
+        val session = summary?.get("gpu_timing")?.asObject()
+            ?: return unavailable("not recorded by this build")
+        if ((session["available"] as? JsonPrimitive)?.content != "true") {
+            return session
+        }
+        val busyPct = samples.mapNotNull { sample ->
+            val native = sample["native"]?.asObject() ?: return@mapNotNull null
+            val window = native.num("window_ms")?.takeIf { it > 0 } ?: return@mapNotNull null
+            val gpu = native["gpu_timing"]?.asObject() ?: return@mapNotNull null
+            gpu.num("submit_busy_union_ms")?.let { it * 100.0 / window }
+        }
+        val frameGpu = session["frame_gpu"]?.asObject()
+        return buildJsonObject {
+            put("available", true)
+            put(
+                "semantics",
+                "frame_gpu: union of [TOP_OF_PIPE, BOTTOM_OF_PIPE] timestamps of every " +
+                    "scheduler submission attributed to one host frame (frame id at submit " +
+                    "time), only for frames whose submissions were all measured. Includes GPU " +
+                    "idle time inside command buffers; excludes the present blit. Not GPU " +
+                    "utilization, critical path or display latency"
+            )
+            put("session", session)
+            put(
+                "submit_busy_union_pct_of_window",
+                stats(busyPct).let {
+                    JsonObject(
+                        it + (
+                            "note" to JsonPrimitive(
+                                "share of wall time covered by measured submissions; " +
+                                    "overlap with other processes' GPU work is not seen"
+                            )
+                            )
+                    )
+                }
+            )
+            put(
+                "cemu_aliases",
+                buildJsonObject {
+                    put("note", "for comparison with Cemu Fork Amaral reports; Eden names win")
+                    put("gpuTimePerFrameMs", frameGpu?.get("p50_ms") ?: JsonNull)
+                    put("gpuTimePerFrameMsP99", frameGpu?.get("p99_ms") ?: JsonNull)
+                    put("gpuCoveragePct", session["coverage_pct"] ?: JsonNull)
+                }
+            )
         }
     }
 
@@ -929,6 +989,36 @@ class DiagnosticsReportBuilder(
             )
             pacingLine(frames?.get("pacing")?.asObject())?.let { appendLine(it) }
             appendLine()
+            val gpu = report["gpu_timing"]?.asObject()
+            appendLine("== GPU time (Vulkan timestamps, GPU clock) ==")
+            if ((gpu?.get("available") as? JsonPrimitive)?.content == "true") {
+                val session = gpu["session"]?.asObject()
+                val frame = session?.get("frame_gpu")?.asObject()
+                appendLine(
+                    "Frame GPU time p50/p90/p99/max ms: ${frame.num1("p50_ms")} / " +
+                        "${frame.num1("p90_ms")} / ${frame.num1("p99_ms")} / " +
+                        frame.num1("max_ms")
+                )
+                appendLine(
+                    "Frames complete/partial: ${session.str("frames_complete")} / " +
+                        "${session.str("frames_partial")}  coverage of submissions: " +
+                        "${session.num1("coverage_pct")}%"
+                )
+                appendLine(
+                    "Dropped: ring full ${session.str("dropped_ring_full")}, unavailable " +
+                        "${session.str("dropped_unavailable")}, " +
+                        "lost ${session.str("dropped_lost")}  " +
+                        "instrumentation CPU ${session.num1("instrumentation_cpu_ms")} ms"
+                )
+                appendLine(
+                    "Union of submissions, % of wall time avg/max: " +
+                        "${gpu["submit_busy_union_pct_of_window"]?.asObject().num1("avg")} / " +
+                        gpu["submit_busy_union_pct_of_window"]?.asObject().num1("max")
+                )
+            } else {
+                appendLine("Not available: ${gpu.str("reason")}")
+            }
+            appendLine()
             appendLine("== Shaders / pipelines ==")
             appendLine(
                 "Runtime misses: graphics=${counters.str("graphics_pipeline_cache_miss")} " +
@@ -965,7 +1055,8 @@ class DiagnosticsReportBuilder(
                     "    max ms: build wait ${hitch.num1("pipeline_build_wait_max_ms")}, " +
                         "fence wait ${hitch.num1("fence_wait_max_ms")}, " +
                         "graphics create ${hitch.num1("graphics_pipeline_create_max_ms")}, " +
-                        "compute create ${hitch.num1("compute_pipeline_create_max_ms")}"
+                        "compute create ${hitch.num1("compute_pipeline_create_max_ms")}, " +
+                        "GPU frame ${hitch.num1("frame_gpu_max_ms")}"
                 )
                 appendLine(
                     "    misses graphics/compute ${hitch.num0("graphics_pipeline_cache_miss")}/" +
@@ -1023,7 +1114,7 @@ class DiagnosticsReportBuilder(
             }
             appendLine()
             appendLine("Times in this report are CPU-side measurements unless stated otherwise;")
-            appendLine("they are not GPU execution times.")
+            appendLine("only the \"GPU time\" section comes from GPU timestamps.")
         }
     }
 
