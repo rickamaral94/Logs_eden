@@ -104,7 +104,7 @@ Top-level fields of `report.json`:
 | `graphics_driver` | Driver selection as configured in Eden (`system` or `custom` + custom driver metadata) |
 | `game.frontend` | Title, program id, homebrew flag, add-ons (name, version, type, enabled). Game files are never read |
 | `game.native` | Program id and build id of the running process |
-| `build` | Eden version, branch, description, revision, build id/date, compiler, shader cache version |
+| `build` | Eden version, branch, description, revision, build id/date, compiler |
 | `cpu_backend` | `NCE` or `JIT` |
 | `settings` | `[ {category, name, value, is_default, per_game} ]`, filtered (see [Privacy](#privacy)) |
 | `vulkan.device` | See [Vulkan device section](#vulkan-device-section) |

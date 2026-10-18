@@ -95,7 +95,6 @@ json StaticInfoJson() {
     build["build_id"] = std::string{Common::g_build_id};
     build["build_date"] = std::string{Common::g_build_date};
     build["compiler"] = std::string{Common::g_compiler_id};
-    build["shader_cache_version"] = std::string{Common::g_shader_cache_version};
     build["is_dev_build"] = Common::g_is_dev_build;
     build["is_nightly_build"] = Common::g_is_nightly_build;
 
