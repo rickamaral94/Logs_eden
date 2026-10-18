@@ -153,12 +153,32 @@ void TurboMode::Run(std::stop_token stop_token) {
     auto cmdbuf = vk::CommandBuffer{cmdbufs[0], m_device.GetDispatchLoader()};
 #endif
 
-    while (!stop_token.stop_requested()) {
 #ifdef __ANDROID__
+    // The kernel request is renewed every 50 ms while the GPU receives work and released after
+    // 100 ms without submissions. Renewing it on every loop iteration spun a CPU core.
+    using namespace std::chrono_literals;
+    const auto recently_submitted = [this] {
+        return std::chrono::steady_clock::now() - m_submission_time <= 100ms;
+    };
+    std::unique_lock lk{m_submission_lock};
+    while (!stop_token.stop_requested()) {
+        if (!recently_submitted()) {
+#ifdef ARCHITECTURE_arm64
+            adrenotools_set_turbo(false);
+#endif
+            m_submission_cv.wait(lk, stop_token, recently_submitted);
+            continue;
+        }
+        lk.unlock();
 #ifdef ARCHITECTURE_arm64
         adrenotools_set_turbo(true);
 #endif
+        lk.lock();
+        m_submission_cv.wait_for(lk, stop_token, 50ms, [] { return false; });
+    }
+    lk.unlock();
 #else
+    while (!stop_token.stop_requested()) {
         // Reset the fence.
         fence.Reset();
 
@@ -224,7 +244,7 @@ void TurboMode::Run(std::stop_token stop_token) {
 
         // Wait for completion.
         fence.Wait();
-#endif
+
         // Wait for the next graphics queue submission if necessary.
         std::unique_lock lk{m_submission_lock};
         m_submission_cv.wait(lk, stop_token, [this] {
@@ -232,6 +252,7 @@ void TurboMode::Run(std::stop_token stop_token) {
                    std::chrono::milliseconds{100};
         });
     }
+#endif
 #if defined(__ANDROID__) && defined(ARCHITECTURE_arm64)
     adrenotools_set_turbo(false);
 #endif

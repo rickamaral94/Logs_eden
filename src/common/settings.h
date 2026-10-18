@@ -577,7 +577,15 @@ struct Values {
                                                    true,
                                                    true};
 
-    SwitchableSetting<bool> renderer_force_max_clock{linkage, false, "force_max_clock",
+    // On by default on Android: on Adreno the kernel governor kept the GPU at 401 of 680 MHz
+    // while frames were GPU bound (Turnip, Snapdragon 8 Gen 2 diagnostic captures).
+    SwitchableSetting<bool> renderer_force_max_clock{linkage,
+#ifdef __ANDROID__
+                                                     true,
+#else
+                                                     false,
+#endif
+                                                     "force_max_clock",
                                                      Category::RendererAdvanced};
 
     SwitchableSetting<bool> use_disk_shader_cache{linkage, true, "use_disk_shader_cache",

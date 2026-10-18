@@ -415,3 +415,4 @@ confirmed or revised with five AB/BA pairs per level on the reference device.
 | 2 (additive) | `process.thread_source` (`native` or `java`); threads are keyed by tid and start time so a reused tid is not compared with another thread; `vulkan.memory_budget_peak.note` |
 | 2 (additive) | counters `pipeline_feedback_valid`, `driver_pipeline_cache_hits`; `driver_cache` field on `slow_*_pipeline_create` events |
 | 2 | `cache_sync` wait reason split into `texture_download`, `buffer_download`, `buffer_write_sync`; frame series gain `skipped_across_pause`; `emulation/paused` and `emulation/resumed` events |
+| 2 (additive) | `vulkan/turbo_mode` event (setting on/off, active) at renderer start |

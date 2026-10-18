@@ -186,6 +186,10 @@ try
         turbo_mode.emplace(instance, dld);
         scheduler.RegisterOnSubmit([this] { turbo_mode->QueueSubmitted(); });
     }
+    Common::Diagnostics::RecordEvent(
+        Common::Diagnostics::Severity::Info, "vulkan", "turbo_mode",
+        {{"setting", Settings::values.renderer_force_max_clock.GetValue() ? "on" : "off"},
+         {"active", turbo_mode ? "true" : "false"}});
 
 #ifdef HAS_RESHADE
     VideoCore::FxChain::Instance().LoadFromSettings();
