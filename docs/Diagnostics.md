@@ -79,14 +79,32 @@ the bundle.
 | `logs/eden_gpu.log` | GPU logger output, optional, if present |
 | `advanced/gpu_crashes/*` | GPU logger state dumps, opt-in only |
 
-## Comparing reports
+## Offline tools
 
-`tools/diagnostics/compare_reports.py A.zip B.zip` (or two `report.json` files) prints the
-differences between two sessions: build, driver, settings, loaded extensions and Eden feature
-flags, swapchain and shader cache, frame time percentiles, counters and timers normalized per
-minute, process/system metrics and native error events. It uses only the Python standard
-library and lists differences without attributing causes. Tests:
-`python3 -m unittest discover -s tools/diagnostics/tests`.
+Python standard library only; bundles are read, never modified. Tests:
+`python3 -m unittest discover -s tools/diagnostics/tests` (set `EDEN_DIAG_FIXTURES` to a
+directory of device bundles to also run the device-bundle regression tests).
+
+- `tools/diagnostics/eden_diag.py validate BUNDLE...` checks manifest sizes and SHA-256,
+  completeness flags, events outside the capture, time order, log coverage (mid-line end, stop
+  line), GPU timestamp coverage, sample gaps, unavailable metrics and unredacted console serials,
+  storage paths or e-mail addresses. Exit code 1 on errors.
+- `eden_diag.py compare A B` (or `compare_reports.py A B`) lists differences between two
+  bundles of schema 1 or 2: build, driver selection and identity, pipeline cache UUID, settings
+  hash and settings, extensions and Eden flags, swapchain and shader cache, frame and GPU time
+  percentiles, counters and timers per minute, process/system metrics, native error events.
+- `eden_diag.py abba --a A1.zip A2.zip ... --b B1.zip B2.zip ... [--variable driver|build|settings|none]
+  [--warmup-s N]` for repeated runs of the same scene. Blockers (comparison invalid): any
+  identity field other than the declared variable differs (game, game build, Eden revision,
+  driver, settings hash, resolution, present mode, CPU backend, capture level) or the variable
+  differs within a group. Caveats: shader cache state, thermal status above 0, battery
+  temperature spread above 5 °C, GPU clock limit differences, durations differing by more than
+  25 %, incomplete or schema 1 bundles, all A runs before all B runs. Prints raw per-run values,
+  then per group the median, min-max and n, and the change of the B median against A. Whole
+  capture percentiles come from the merged native histograms; with `--warmup-s` only
+  count-based metrics are recomputed from the windows after the cut (FPS, share of frames over
+  20 ms, mean frame GPU time), because window percentiles cannot be merged. Segmenting by
+  markers is not automated yet; use separate captures per scene or `--warmup-s`.
 
 ## Session integrity (schema 2)
 
@@ -346,11 +364,35 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 
 ## Validation status
 
-- Host: native core unit tests (Catch2, ASan/UBSan/TSan), JVM unit tests for redaction, `/proc`
-  parsing, report building and zip writing, Kotlin compilation, ktlint on the new files.
-- Native Vulkan/JNI changes: differential syntax check with NDK clang (aarch64, Eden `-Werror`
-  flags) against the base commit.
-- Not yet validated: a full APK build and on-device data collection.
+What each kind of test proves:
+
+- Host native tests (Catch2 under ASan/UBSan and TSan, in CI): capture isolation (sequential
+  captures, event scoping, final summary after stop), wait-reason scopes and thread breakdown,
+  GPU timing bookkeeping (48-bit wrap, unwrapping, ring saturation, pending/unavailable/lost
+  results, partial frames, sum vs union). They prove the logic, not Vulkan behavior.
+- JVM tests: log segment extraction (two captures in one process log, previous process log,
+  missing stop line, mid-line end, size limit), event scoping for schema 1 and 2, exit linking
+  and end classification, identity changes, manifest hashes, configuration hashes, console
+  serial redaction, ELF build-id parsing, `/proc/self/maps` filtering, native thread stat
+  parsing, report sections and summary.
+- Device-bundle regression (`EDEN_DIAG_FIXTURES`, not committed because bundles hold user data):
+  the two schema 1 bundles from an Odin 2 Portal (Hollow Knight, Little Nightmares) are read
+  unchanged; the 17 earlier-capture events are classified as context; both logs are detected as
+  ending mid-line without their stop line; `abba` refuses them as an A/B (different games, same
+  driver).
+- Offline tools: validate, compare and abba on synthetic bundles.
+- Native Vulkan/JNI code: differential NDK clang syntax check (aarch64, Eden warning flags) and
+  the CI APK build. The native thread reader was also run on a Linux host.
+- Not validated: anything on a device with these changes, including that timestamps return
+  plausible values on Turnip and the proprietary driver, timeline-semaphore devices, pipeline
+  creation feedback results, the overhead of each level, and crash/ANR recovery paths.
+
+### Proposed overhead budget (not measured yet)
+
+Standard with GPU time: at most 1 % lower guest FPS and at most 0.2 ms added to the median
+guest frame interval against diagnostics off, sampler cost under 5 ms per sample, GPU
+instrumentation CPU time under 0.1 % of wall time. Detailed: at most 2 % lower FPS. To be
+confirmed or revised with five AB/BA pairs per level on the reference device.
 
 ## Schema changelog
 

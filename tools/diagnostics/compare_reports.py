@@ -15,7 +15,7 @@ import json
 import sys
 import zipfile
 
-SUPPORTED_SCHEMA = 1
+SUPPORTED_SCHEMAS = (1, 2)
 
 
 def load_report(path):
@@ -45,6 +45,12 @@ def fmt(value):
     if isinstance(value, float):
         return f"{value:.2f}"
     return str(value)
+
+
+def driver_selection(report):
+    """Schema 2 moved the Eden driver selection to graphics_driver.selected."""
+    driver = get(report, "graphics_driver", default={}) or {}
+    return driver.get("selected", driver) if isinstance(driver, dict) else {}
 
 
 def duration_minutes(report):
@@ -133,9 +139,9 @@ def compare(a, b):
     out = []
     for name, report in (("A", a), ("B", b)):
         version = report.get("schema_version")
-        if version != SUPPORTED_SCHEMA:
+        if version not in SUPPORTED_SCHEMAS:
             out.append(f"warning: report {name} has schema_version {version}, "
-                       f"this tool understands {SUPPORTED_SCHEMA}")
+                       f"this tool understands {', '.join(map(str, SUPPORTED_SCHEMAS))}")
     out.append(f"A: {get(a, 'session', 'session_id')}  {fmt(get(a, 'game', 'frontend', 'title'))}")
     out.append(f"B: {get(b, 'session', 'session_id')}  {fmt(get(b, 'game', 'frontend', 'title'))}")
     out.append("")
@@ -151,15 +157,20 @@ def compare(a, b):
         ("Game build id", ("game", "native", "build_id")),
         ("Capture level", ("session", "level")),
     ], a, b, out)
+    selection_a, selection_b = {"s": driver_selection(a)}, {"s": driver_selection(b)}
+    compare_fields("Driver selection", [
+        ("Selection", ("s", "selection")),
+        ("Custom driver", ("s", "custom", "name")),
+        ("Custom driver version", ("s", "custom", "version")),
+    ], selection_a, selection_b, out)
     compare_fields("Driver", [
-        ("Selection", ("graphics_driver", "selection")),
-        ("Custom driver", ("graphics_driver", "custom", "name")),
-        ("Custom driver version", ("graphics_driver", "custom", "version")),
         ("VkDriverId", ("vulkan", "device", "driver", "id")),
         ("Driver name", ("vulkan", "device", "driver", "name")),
         ("Driver info", ("vulkan", "device", "driver", "info")),
         ("Driver version (raw)", ("vulkan", "device", "driver_version_raw")),
         ("Vulkan API", ("vulkan", "device", "api_version")),
+        ("Pipeline cache UUID", ("vulkan", "device", "pipeline_cache_uuid")),
+        ("Settings hash", ("configuration_hashes", "effective_settings_sha256")),
     ], a, b, out)
     compare_settings(a, b, out)
     compare_extensions(a, b, out)
@@ -184,6 +195,13 @@ def compare(a, b):
         ("Guest frame interval p99", guest + ("p99_ms",)),
         ("Guest frame interval p99.9", guest + ("p999_ms",)),
         ("Guest frame interval max", guest + ("max_ms",)),
+    ], a, b, out)
+    gpu = ("gpu_timing", "session", "frame_gpu")
+    compare_numbers("GPU time per frame (Vulkan timestamps, ms)", [
+        ("Frame GPU p50", gpu + ("p50_ms",)),
+        ("Frame GPU p99", gpu + ("p99_ms",)),
+        ("Frame GPU max", gpu + ("max_ms",)),
+        ("Submission coverage %", ("gpu_timing", "session", "coverage_pct")),
     ], a, b, out)
 
     counter_names = sorted(set(get(a, "native_summary", "counters", default={}) or {})

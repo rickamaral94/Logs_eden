@@ -26,12 +26,14 @@ Builds are produced by passing `-PdiagnosticsBuild=true` to Gradle (or setting
 3. Pick a level:
    - **Standard**: samples every 2 seconds, lowest overhead.
    - **Detailed**: samples every second and also records PSS memory.
-4. Optionally describe where you are in the game (for example "chapter 3, first boss").
-5. Tap **Start capture** and keep playing.
-6. When you see the problem, open **Diagnostics** again and tap **Mark issue**. Pick what you saw
+4. Leave **Measure GPU time** on (it records how long the GPU spent on each frame; turn it off
+   only to compare its overhead).
+5. Optionally describe where you are in the game (for example "chapter 3, first boss").
+6. Tap **Start capture** and keep playing.
+7. When you see the problem, open **Diagnostics** again and tap **Mark issue**. Pick what you saw
    (missing textures, flicker, stutter, ...) and add a short note. The marker uses the moment you
    opened the dialog, not the moment you finished typing.
-7. Tap **Stop capture**. Closing the game also stops it. A capture stops by itself after 30
+8. Tap **Stop capture**. Closing the game also stops it. A capture stops by itself after 30
    minutes.
 
 ## Exporting
@@ -41,7 +43,7 @@ After stopping, the review screen opens. You can also find all captures in
 
 Before anything is written you can choose:
 
-- Include the Eden log (last 4 MiB).
+- Include the Eden log: only the lines of this capture, plus a little labelled context before it.
 - Include the GPU log, if the GPU logging setting produced one.
 - Include the device model and build fingerprint.
 - Include advanced GPU logger dumps (off by default; they can be large).
@@ -53,9 +55,26 @@ opens the share sheet.
 If the game fails to start, use **Snapshot report** in the capture list to export the device,
 driver and Vulkan information plus recent errors without a capture.
 
+## Comparing two drivers or builds
+
+To compare driver A with driver B on the same scene:
+
+1. Use the same game, game version, settings, resolution and save point for every run, and let
+   the shader cache warm up first (play the scene once without capturing).
+2. Alternate the runs: A, B, B, A, A, B, B, A, A, B (five pairs), each about 2-3 minutes of the
+   same scene, with a few minutes of rest if the device gets warm.
+3. Export every capture and run
+   `python3 tools/diagnostics/eden_diag.py abba --a A1.zip A2.zip ... --b B1.zip B2.zip ...`.
+   It refuses comparisons where something other than the driver changed and prints the median
+   and spread of each metric.
+
+To measure the overhead of the diagnostics themselves, alternate runs with GPU time on and off,
+and runs at Standard and Detailed level, on the same scene, and compare FPS, frame times and
+`sampler_cost_ms` the same way.
+
 ## What is never included
 
-ROMs, firmware, keys, saves, passwords or tokens, and memory dumps. Storage paths, file URIs,
+ROMs, firmware, keys, saves, passwords or tokens, console serial numbers and memory dumps. Storage paths, file URIs,
 e-mail addresses and network addresses are removed from the bundle.
 
 ## Tips for useful reports

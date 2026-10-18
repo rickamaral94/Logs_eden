@@ -51,6 +51,9 @@ jobs:
             -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_tsan"
           "$RUNNER_TEMP/sd_tsan"
 
+      - name: Offline report tools
+        run: python3 -m unittest discover -s tools/diagnostics/tests -v
+
   android:
     name: Android APK (Eden Diagnostics, mainline Release)
     runs-on: ubuntu-24.04
