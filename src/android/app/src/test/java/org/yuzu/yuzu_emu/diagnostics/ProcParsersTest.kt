@@ -5,6 +5,7 @@ package org.yuzu.yuzu_emu.diagnostics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProcParsersTest {
@@ -58,5 +59,20 @@ class ProcParsersTest {
         assertEquals("emu_hle_services", ProcParsers.threadCategory("nvservices", false))
         assertEquals("emu_hle_services", ProcParsers.threadCategory("FS:2", false))
         assertEquals("ui", ProcParsers.threadCategory("VsyncReceiver", false))
+    }
+
+    @Test
+    fun nativeThreadStatsKeepNamesAndStartTimes() {
+        val stats = ProcParsers.parseNativeThreadStats(
+            "4567 81234 120 6\tCPUCore_0\n4568 81300 5 7\tHostTiming\nbroken line\n"
+        )
+        assertEquals(2, stats.size)
+        assertEquals("CPUCore_0", stats[0].name)
+        assertEquals(120L, stats[0].ticks)
+        assertEquals(6, stats[0].lastCpu)
+        assertEquals("4567@81234", stats[0].key)
+        // A reused tid with another start time is a different thread.
+        val reused = ProcParsers.parseNativeThreadStats("4567 99999 3 1\tother\n").single()
+        assertTrue(reused.key != stats[0].key)
     }
 }

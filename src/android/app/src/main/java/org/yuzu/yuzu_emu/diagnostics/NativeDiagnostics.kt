@@ -9,6 +9,9 @@ object NativeDiagnostics {
     external fun stopCapture()
     external fun isCapturing(): Boolean
 
+    /** "tid starttime ticks cpu\tname" lines for every thread; see ProcParsers. */
+    external fun readThreadStats(): String
+
     /** Vulkan timestamp queries around scheduler submissions while capturing. */
     external fun setGpuTimestampsEnabled(enabled: Boolean)
 

@@ -44,7 +44,8 @@ class AndroidMetricsSampler(
 
     private var previousCpuMs = Process.getElapsedCpuTime()
     private var previousWallMs = SystemClock.elapsedRealtime()
-    private var previousThreadTicks = readThreads().associate { it.tid to it.ticks }
+    private var threadSource = "native"
+    private var previousThreadTicks = readThreads().associate { it.key to it.ticks }
     private var previousGc = readGcStats()
     private var sampleCount = 0L
 
@@ -87,6 +88,7 @@ class AndroidMetricsSampler(
                     put("cpu_cores", Runtime.getRuntime().availableProcessors())
                     put("threads", threads.first)
                     put("thread_categories", threads.second)
+                    put("thread_source", threadSource)
                     put("memory", memory)
                     put("gc", gc)
                 }
@@ -119,12 +121,13 @@ class AndroidMetricsSampler(
             availability["threads"] = "${DiagnosticsSchema.UNAVAILABLE}: /proc/self/task unreadable"
             return JsonArray(emptyList()) to JsonObject(emptyMap())
         }
+        // Keyed by tid and start time, so a reused tid never yields a delta against another thread.
         val deltas = current.mapNotNull { stat ->
-            val previous = previousThreadTicks[stat.tid] ?: return@mapNotNull null
+            val previous = previousThreadTicks[stat.key] ?: return@mapNotNull null
             val delta = stat.ticks - previous
             if (delta < 0) null else stat to delta
         }
-        previousThreadTicks = current.associate { it.tid to it.ticks }
+        previousThreadTicks = current.associate { it.key to it.ticks }
 
         val tickMs = 1000.0 / clockTicksPerSecond
         fun pct(ticks: Long) = ticks * tickMs * 100.0 / wallDeltaMs
@@ -246,11 +249,19 @@ class AndroidMetricsSampler(
         }
     }
 
-    private fun readThreads(): List<ThreadCpuStat> =
-        File("/proc/self/task").listFiles()?.mapNotNull { dir ->
+    private fun readThreads(): List<ThreadCpuStat> {
+        if (threadSource == "native") {
+            val native = runCatching { NativeDiagnostics.readThreadStats() }.getOrNull()
+            if (native != null) {
+                return ProcParsers.parseNativeThreadStats(native)
+            }
+            threadSource = "java"
+        }
+        return File("/proc/self/task").listFiles()?.mapNotNull { dir ->
             runCatching { ProcParsers.parseThreadStat(dir.resolve("stat").readText()) }
                 .getOrNull()
         }.orEmpty()
+    }
 
     private fun readCpuFrequenciesMhz(): List<Long?> {
         val cores = Runtime.getRuntime().availableProcessors()

@@ -924,6 +924,12 @@ class DiagnosticsReportBuilder(
         return buildJsonObject {
             put("source", "VK_EXT_memory_budget (driver reported)")
             put(
+                "note",
+                "heapUsage is the driver's estimate of this process' use of the heap, not " +
+                    "Eden allocator accounting or dedicated VRAM; on integrated GPUs the heap " +
+                    "is system RAM and overlaps process RSS"
+            )
+            put(
                 "heaps",
                 buildJsonArray {
                     peaks.toSortedMap().forEach { (index, value) ->

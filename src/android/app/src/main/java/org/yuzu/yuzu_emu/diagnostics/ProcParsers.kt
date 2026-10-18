@@ -8,8 +8,12 @@ data class ThreadCpuStat(
     val tid: Int,
     val name: String,
     val ticks: Long,
-    val lastCpu: Int?
-)
+    val lastCpu: Int?,
+    /** Start time in clock ticks since boot; tells a reused tid apart from the old thread. */
+    val startTime: Long? = null
+) {
+    val key: String get() = "$tid@${startTime ?: "?"}"
+}
 
 object ProcParsers {
     /**
@@ -30,8 +34,32 @@ object ProcParsers {
         val utime = fields.getOrNull(11)?.toLongOrNull() ?: return null
         val stime = fields.getOrNull(12)?.toLongOrNull() ?: return null
         val lastCpu = fields.getOrNull(36)?.toIntOrNull()
-        return ThreadCpuStat(tid, name.trim().ifEmpty { "unnamed" }, utime + stime, lastCpu)
+        val startTime = fields.getOrNull(19)?.toLongOrNull()
+        return ThreadCpuStat(
+            tid,
+            name.trim().ifEmpty { "unnamed" },
+            utime + stime,
+            lastCpu,
+            startTime
+        )
     }
+
+    /** Parses the output of NativeDiagnostics.readThreadStats. */
+    fun parseNativeThreadStats(raw: String): List<ThreadCpuStat> = raw.lineSequence()
+        .mapNotNull { line ->
+            val tab = line.indexOf('\t')
+            if (tab <= 0) return@mapNotNull null
+            val numbers = line.substring(0, tab).split(' ')
+            if (numbers.size != 4) return@mapNotNull null
+            ThreadCpuStat(
+                tid = numbers[0].toIntOrNull() ?: return@mapNotNull null,
+                name = line.substring(tab + 1).trim().ifEmpty { "unnamed" },
+                ticks = numbers[2].toLongOrNull() ?: return@mapNotNull null,
+                lastCpu = numbers[3].toIntOrNull(),
+                startTime = numbers[1].toLongOrNull()
+            )
+        }
+        .toList()
 
     /** Parses the kB values of /proc/self/status, e.g. VmRSS and VmHWM. */
     fun parseStatusKb(raw: String): Map<String, Long> {

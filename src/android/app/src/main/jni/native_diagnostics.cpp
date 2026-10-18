@@ -6,6 +6,10 @@
 #include <string>
 #include <string_view>
 
+#include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <android/api-level.h>
 #include <fmt/format.h>
 #include <jni.h>
@@ -129,6 +133,70 @@ json StaticInfoJson() {
     return out;
 }
 
+// One line per thread of this process: "tid starttime utime+stime processor\tname". Reading the
+// stat files natively avoids a Java File/Reader per thread, which dominated the sampler cost.
+std::string ThreadStats() {
+    std::string out;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) {
+        return out;
+    }
+    std::array<char, 1024> buffer{};
+    while (const dirent* entry = readdir(dir)) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') {
+            continue;
+        }
+        const std::string path = fmt::format("/proc/self/task/{}/stat", entry->d_name);
+        const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (fd < 0) {
+            continue;
+        }
+        const ssize_t size = read(fd, buffer.data(), buffer.size() - 1);
+        close(fd);
+        if (size <= 0) {
+            continue;
+        }
+        const std::string_view stat{buffer.data(), static_cast<size_t>(size)};
+        const size_t open_paren = stat.find('(');
+        const size_t close_paren = stat.rfind(')');
+        if (open_paren == std::string_view::npos || close_paren == std::string_view::npos ||
+            close_paren < open_paren || close_paren + 2 >= stat.size()) {
+            continue;
+        }
+        // Fields after the name start at field 3 (state).
+        std::array<std::string_view, 40> fields{};
+        size_t count = 0;
+        std::string_view rest = stat.substr(close_paren + 2);
+        while (!rest.empty() && count < fields.size()) {
+            const size_t space = rest.find(' ');
+            fields[count++] = rest.substr(0, space);
+            rest = space == std::string_view::npos ? std::string_view{} : rest.substr(space + 1);
+        }
+        if (count < 37) {
+            continue;
+        }
+        const auto number = [](std::string_view text) {
+            u64 value = 0;
+            for (const char c : text) {
+                if (c < '0' || c > '9') {
+                    break;
+                }
+                value = value * 10 + static_cast<u64>(c - '0');
+            }
+            return value;
+        };
+        // utime 14, stime 15, starttime 22, processor 39 (1-based field numbers).
+        const u64 ticks = number(fields[11]) + number(fields[12]);
+        std::string name{stat.substr(open_paren + 1, close_paren - open_paren - 1)};
+        std::ranges::replace(name, '\t', ' ');
+        std::ranges::replace(name, '\n', ' ');
+        out += fmt::format("{} {} {} {}\t{}\n", entry->d_name, number(fields[19]), ticks,
+                           number(fields[36]), name);
+    }
+    closedir(dir);
+    return out;
+}
+
 jstring SafeJson(JNIEnv* env, auto&& producer) {
     try {
         return Common::Android::ToJString(env, producer());
@@ -159,6 +227,11 @@ void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_flushLog(JNIEnv* env,
 void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_setGpuTimestampsEnabled(
     JNIEnv* env, jobject obj, jboolean enabled) {
     Diag::SetGpuTimestampsEnabled(enabled != JNI_FALSE);
+}
+
+jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_readThreadStats(JNIEnv* env,
+                                                                             jobject obj) {
+    return Common::Android::ToJString(env, ThreadStats());
 }
 
 jlong Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_captureSequence(JNIEnv* env,
