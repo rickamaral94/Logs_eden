@@ -17,7 +17,6 @@ import android.system.Os
 import android.system.OsConstants
 import java.io.File
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -243,7 +242,11 @@ class AndroidMetricsSampler(
 
     private fun readCpuFrequenciesMhz(): List<Long?> {
         val cores = Runtime.getRuntime().availableProcessors()
-        return (0 until cores).map { readLong("/sys/devices/system/cpu/cpu$it/cpufreq/scaling_cur_freq")?.div(1000L) }
+        return (0 until cores).map {
+            readLong(
+                "/sys/devices/system/cpu/cpu$it/cpufreq/scaling_cur_freq"
+            )?.div(1000L)
+        }
     }
 
     private fun readBatteryTemperature(): Double? {
@@ -270,7 +273,13 @@ class AndroidMetricsSampler(
 
         /** Describes every metric produced by [sample]: unit, scope and source. */
         val METRIC_DEFINITIONS: JsonObject = buildJsonObject {
-            fun def(name: String, unit: String, scope: String, source: String, note: String? = null) {
+            fun def(
+                name: String,
+                unit: String,
+                scope: String,
+                source: String,
+                note: String? = null
+            ) {
                 put(
                     name,
                     buildJsonObject {
@@ -281,28 +290,122 @@ class AndroidMetricsSampler(
                     }
                 )
             }
-            def("process.cpu_pct_of_one_core", "%", "process", "Process.getElapsedCpuTime", "100 = one core fully busy")
-            def("process.threads[].cpu_pct_of_one_core", "%", "process", "/proc/self/task/*/stat utime+stime")
-            def("process.thread_categories", "%", "process", "/proc/self/task/*/stat grouped by thread name")
+            def(
+                "process.cpu_pct_of_one_core",
+                "%",
+                "process",
+                "Process.getElapsedCpuTime",
+                "100 = one core fully busy"
+            )
+            def(
+                "process.threads[].cpu_pct_of_one_core",
+                "%",
+                "process",
+                "/proc/self/task/*/stat utime+stime"
+            )
+            def(
+                "process.thread_categories",
+                "%",
+                "process",
+                "/proc/self/task/*/stat grouped by thread name"
+            )
             def("process.memory.rss_kb", "KiB", "process", "/proc/self/status VmRSS")
-            def("process.memory.rss_peak_kb", "KiB", "process", "/proc/self/status VmHWM", "peak since process start")
-            def("process.memory.pss_kb", "KiB", "process", "Debug.getPss", "detailed level, every 10 samples")
+            def(
+                "process.memory.rss_peak_kb",
+                "KiB",
+                "process",
+                "/proc/self/status VmHWM",
+                "peak since process start"
+            )
+            def(
+                "process.memory.pss_kb",
+                "KiB",
+                "process",
+                "Debug.getPss",
+                "detailed level, every 10 samples"
+            )
             def("process.memory.java_heap_used_kb", "KiB", "process", "Runtime")
-            def("process.memory.native_heap_allocated_kb", "KiB", "process", "Debug.getNativeHeapAllocatedSize", "malloc heap only, excludes driver mappings")
+            def(
+                "process.memory.native_heap_allocated_kb",
+                "KiB",
+                "process",
+                "Debug.getNativeHeapAllocatedSize",
+                "malloc heap only, excludes driver mappings"
+            )
             def("process.gc.*", "count/ms per window", "process", "Debug.getRuntimeStat art.gc.*")
             def("system.mem_available_kb", "KiB", "system", "ActivityManager.getMemoryInfo")
-            def("system.thermal_status", "enum", "system", "PowerManager.getCurrentThermalStatus", "0 none .. 6 shutdown")
-            def("system.thermal_headroom", "ratio", "system", "PowerManager.getThermalHeadroom(0)", "1.0 = severe throttling threshold")
+            def(
+                "system.thermal_status",
+                "enum",
+                "system",
+                "PowerManager.getCurrentThermalStatus",
+                "0 none .. 6 shutdown"
+            )
+            def(
+                "system.thermal_headroom",
+                "ratio",
+                "system",
+                "PowerManager.getThermalHeadroom(0)",
+                "1.0 = severe throttling threshold"
+            )
             def("system.battery_temp_c", "°C", "system", "ACTION_BATTERY_CHANGED")
             def("system.cpu_freq_mhz", "MHz", "system", "cpufreq scaling_cur_freq")
-            def("system.gpu_busy_pct_kgsl", "%", "system", "/sys/class/kgsl/kgsl-3d0/gpubusy", "Adreno kernel driver, all processes")
-            def("emulator.shaders_building", "count", "process", "NativeLibrary.getShadersBuilding", "shaders queued or compiling at sample time")
-            def("native.counters.game_frames", "frames per window", "process", "PerfStats::EndGameFrame", "game FPS = game_frames / window_ms * 1000")
-            def("native.timers.*", "µs CPU wall clock", "process", "common/session_diagnostics", "CPU time inside or blocked on the operation, not GPU execution time")
-            def("native.frames.guest_present_interval", "ms", "process", "PerfStats::EndSystemFrame", "interval between guest display flips")
-            def("native.frames.host_present_interval", "ms", "process", "RendererVulkan::Composite", "interval between host composites, not display scanout")
-            def("native.samplers.vulkan_memory_budget", "bytes", "process", "VK_EXT_memory_budget", "driver reported heap usage and budget")
-            def("sampler_cost_ms", "ms", "process", "SystemClock", "time spent collecting the Android metrics of this sample")
+            def(
+                "system.gpu_busy_pct_kgsl",
+                "%",
+                "system",
+                "/sys/class/kgsl/kgsl-3d0/gpubusy",
+                "Adreno kernel driver, all processes"
+            )
+            def(
+                "emulator.shaders_building",
+                "count",
+                "process",
+                "NativeLibrary.getShadersBuilding",
+                "shaders queued or compiling at sample time"
+            )
+            def(
+                "native.counters.game_frames",
+                "frames per window",
+                "process",
+                "PerfStats::EndGameFrame",
+                "game FPS = game_frames / window_ms * 1000"
+            )
+            def(
+                "native.timers.*",
+                "µs CPU wall clock",
+                "process",
+                "common/session_diagnostics",
+                "CPU time inside or blocked on the operation, not GPU execution time"
+            )
+            def(
+                "native.frames.guest_present_interval",
+                "ms",
+                "process",
+                "PerfStats::EndSystemFrame",
+                "interval between guest display flips"
+            )
+            def(
+                "native.frames.host_present_interval",
+                "ms",
+                "process",
+                "RendererVulkan::Composite",
+                "interval between host composites, not display scanout"
+            )
+            def(
+                "native.samplers.vulkan_memory_budget",
+                "bytes",
+                "process",
+                "VK_EXT_memory_budget",
+                "driver reported heap usage and budget"
+            )
+            def(
+                "sampler_cost_ms",
+                "ms",
+                "process",
+                "SystemClock",
+                "time spent collecting the Android metrics of this sample"
+            )
         }
     }
 }

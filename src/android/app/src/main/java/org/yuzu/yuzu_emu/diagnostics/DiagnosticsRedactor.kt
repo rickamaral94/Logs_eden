@@ -63,8 +63,9 @@ class DiagnosticsRedactor(knownDirectories: Map<String, String> = emptyMap()) {
         private val PATH_PATTERNS = listOf(
             Regex("(?i)\\b(?:content|file)://[^\\s\"'<>]+") to "<uri>",
             Regex(
-                "(?i)(?:/storage/emulated/\\d+|/storage/[0-9A-F]{4}-[0-9A-F]{4}|/sdcard|/mnt/[^\\s/]+|" +
-                    "/data/user(?:_de)?/\\d+|/data/data|/data/media/\\d+|/data/app)(?:/[^\\s\"'<>:,;)]*)?"
+                "(?i)(?:/storage/emulated/\\d+|/storage/[0-9A-F]{4}-[0-9A-F]{4}|/sdcard|" +
+                    "/mnt/[^\\s/]+|/data/user(?:_de)?/\\d+|/data/data|/data/media/\\d+|" +
+                    "/data/app)(?:/[^\\s\"'<>:,;)]*)?"
             ) to "<path>",
             Regex("(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b") to "<email>"
         )
@@ -72,7 +73,8 @@ class DiagnosticsRedactor(knownDirectories: Map<String, String> = emptyMap()) {
         private val NETWORK_PATTERNS = listOf(
             Regex("(?i)\\b(?:[0-9A-F]{2}:){5}[0-9A-F]{2}\\b") to "<mac>",
             Regex(
-                "(?<![\\d.])(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?::\\d{1,5})?(?![\\d.])"
+                "(?<![\\d.])(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}" +
+                    "(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?::\\d{1,5})?(?![\\d.])"
             ) to "<ip>"
         )
     }

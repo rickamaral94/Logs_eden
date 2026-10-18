@@ -934,4 +934,57 @@
     <!-- Licenses screen strings -->
     <string name="licenses">Licenças</string>
     <string name="license_fidelityfx_fsr_description">Upscaling de alta qualidade da AMD</string>
-    </resources>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics">Diagnóstico</string>
+    <string name="diagnostics_description">Registra dados de Vulkan, CPU, memória e tempo de quadro enquanto você joga, para que problemas gráficos ou de desempenho possam ser reproduzidos e comparados. O nível detalhado coleta com mais frequência e inclui leituras de memória PSS.</string>
+    <string name="diagnostics_status_idle">Sem captura</string>
+    <string name="diagnostics_status_capturing">Capturando: %1$s, %2$d marcação(ões)</string>
+    <string name="diagnostics_level_standard">Padrão (a cada 2 s, baixo impacto)</string>
+    <string name="diagnostics_level_detailed">Detalhado (a cada 1 s, inclui PSS)</string>
+    <string name="diagnostics_stage_hint">Em que parte do jogo você está? (opcional)</string>
+    <string name="diagnostics_local_notice">As capturas ficam neste aparelho. Nada é enviado a lugar nenhum, a menos que você mesmo exporte e compartilhe um pacote. A captura para após 30 minutos.</string>
+    <string name="diagnostics_start">Iniciar captura</string>
+    <string name="diagnostics_stop">Encerrar captura</string>
+    <string name="diagnostics_mark_issue">Marcar problema</string>
+    <string name="diagnostics_marker_category">O que você viu?</string>
+    <string name="diagnostics_marker_note">Descreva o problema (opcional)</string>
+    <string name="diagnostics_marker_saved">Problema marcado</string>
+    <string name="diagnostics_start_failed">Não foi possível iniciar a captura: %1$s</string>
+    <string name="diagnostics_review_export">Revisar e exportar</string>
+    <string name="diagnostics_include_eden_log">Incluir log do Eden (últimos 4 MiB)</string>
+    <string name="diagnostics_include_gpu_log">Incluir log da GPU, se existir</string>
+    <string name="diagnostics_include_identity">Incluir modelo do aparelho e fingerprint do sistema</string>
+    <string name="diagnostics_include_advanced">Incluir dumps avançados do log da GPU</string>
+    <string name="diagnostics_advanced_description">Os dumps do log da GPU contêm chamadas Vulkan recentes e estado de pipelines, gravados pela configuração de log da GPU. Podem ser grandes. Dumps de memória nunca são coletados.</string>
+    <string name="diagnostics_preview_loading">Preparando a prévia…</string>
+    <string name="diagnostics_preview_contents">Arquivos no pacote:</string>
+    <string name="diagnostics_preview_redaction">Caminhos, URIs, e-mails e endereços de rede são removidos (%1$d valores). ROMs, firmware, chaves, saves e credenciais nunca são incluídos.</string>
+    <string name="diagnostics_export_share">Exportar e compartilhar</string>
+    <string name="diagnostics_export_failed">Falha ao exportar: %1$s</string>
+    <string name="diagnostics_export_saved">Pacote salvo em diagnostics/exports</string>
+    <string name="diagnostics_delete">Excluir captura</string>
+    <string name="diagnostics_sessions">Capturas de diagnóstico</string>
+    <string name="diagnostics_sessions_description">Revisar, exportar ou excluir capturas de diagnóstico</string>
+    <string name="diagnostics_sessions_empty">Nenhuma captura ainda. Inicie uma pelo menu do jogo.</string>
+    <string name="diagnostics_snapshot">Relatório instantâneo</string>
+    <string name="diagnostics_session_item">%1$s · %2$s · %3$s · %4$d marcação(ões)</string>
+    <string name="diagnostics_state_completed">concluída</string>
+    <string name="diagnostics_state_interrupted">interrompida</string>
+    <string name="diagnostics_state_active">em andamento</string>
+    <string-array name="diagnostics_issue_categories">
+        <item>Texturas ausentes</item>
+        <item>Cores incorretas</item>
+        <item>Artefatos</item>
+        <item>Flicker</item>
+        <item>Geometria distorcida</item>
+        <item>Tela preta</item>
+        <item>Travadas por shader</item>
+        <item>Queda de FPS</item>
+        <item>Stutter</item>
+        <item>Congelamento</item>
+        <item>Problema de áudio</item>
+        <item>Outro</item>
+    </string-array>
+
+</resources>

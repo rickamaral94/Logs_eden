@@ -79,7 +79,11 @@ class DiagnosticsReportBuilderTest {
     }
 
     private fun build(options: ExportOptions = ExportOptions()): BundlePlan {
-        val log = File(root, "eden_log.txt").apply { writeText("line /storage/emulated/0/Roms/a.nsp\n") }
+        val log = File(root, "eden_log.txt").apply {
+            writeText(
+                "line /storage/emulated/0/Roms/a.nsp\n"
+            )
+        }
         val inputs = ExportInputs(
             sessionDir = session,
             edenLog = log,
@@ -101,7 +105,10 @@ class DiagnosticsReportBuilderTest {
         )) {
             assertTrue("missing $field", report.containsKey(field))
         }
-        assertEquals(DiagnosticsSchema.SCHEMA_VERSION, report["schema_version"]!!.jsonPrimitive.content.toInt())
+        assertEquals(
+            DiagnosticsSchema.SCHEMA_VERSION,
+            report["schema_version"]!!.jsonPrimitive.content.toInt()
+        )
     }
 
     @Test
@@ -110,11 +117,15 @@ class DiagnosticsReportBuilderTest {
         val fps = report["frame_rate"]!!.jsonObject
         assertEquals(30.0, fps["guest_present_fps_avg"]!!.jsonPrimitive.content.toDouble(), 0.001)
         assertEquals(15.0, fps["game_fps_avg"]!!.jsonPrimitive.content.toDouble(), 0.001)
-        val heap = report["vulkan"]!!.jsonObject["memory_budget_peak"]!!.jsonObject["heaps"]!!.jsonArray[0].jsonObject
+        val budget = report["vulkan"]!!.jsonObject["memory_budget_peak"]!!.jsonObject
+        val heap = budget["heaps"]!!.jsonArray[0].jsonObject
         assertEquals(300L, heap["peak_usage_bytes"]!!.jsonPrimitive.content.toLong())
         val android = report["android_summary"]!!.jsonObject
         assertEquals(3, android["samples"]!!.jsonPrimitive.content.toInt())
-        assertEquals("4997", android["system_mem_available_kb_min"]!!.jsonPrimitive.content.substringBefore('.'))
+        assertEquals(
+            "4997",
+            android["system_mem_available_kb_min"]!!.jsonPrimitive.content.substringBefore('.')
+        )
     }
 
     @Test
@@ -123,8 +134,16 @@ class DiagnosticsReportBuilderTest {
         val context = marker["context"]!!.jsonObject
         assertEquals("flicker", marker["category"]!!.jsonPrimitive.content)
         assertEquals(3, context["samples"]!!.jsonPrimitive.content.toInt())
-        assertEquals(120.0, context["guest_frame_interval_max_ms"]!!.jsonPrimitive.content.toDouble(), 0.001)
-        assertEquals(3L, context["counters"]!!.jsonObject["graphics_pipeline_cache_miss"]!!.jsonPrimitive.content.toLong())
+        assertEquals(
+            120.0,
+            context["guest_frame_interval_max_ms"]!!.jsonPrimitive.content.toDouble(),
+            0.001
+        )
+        assertEquals(
+            3L,
+            context["counters"]!!.jsonObject["graphics_pipeline_cache_miss"]!!
+                .jsonPrimitive.content.toLong()
+        )
         val note = marker["note"]!!.jsonPrimitive.content
         assertFalse(note.contains("192.168.0.2"))
         assertFalse(note.contains("/sdcard"))
@@ -136,14 +155,18 @@ class DiagnosticsReportBuilderTest {
         val all = plan.entries.joinToString("\n") { String(it.content) }
         assertFalse(all.contains("/storage/emulated/0"))
         assertFalse(all.contains("192.168.0.2"))
-        assertTrue(plan.report["privacy"]!!.jsonObject["redacted_values"]!!.jsonPrimitive.content.toInt() > 0)
+        assertTrue(
+            plan.report["privacy"]!!.jsonObject["redacted_values"]!!
+                .jsonPrimitive.content.toInt() > 0
+        )
     }
 
     @Test
     fun deviceIdentityCanBeRemoved() {
         val withIdentity = build().report["device"]!!.jsonObject
         assertTrue(withIdentity["identity"] is JsonObject)
-        val without = build(ExportOptions(includeDeviceIdentity = false)).report["device"]!!.jsonObject
+        val withoutOptions = ExportOptions(includeDeviceIdentity = false)
+        val without = build(withoutOptions).report["device"]!!.jsonObject
         assertEquals("removed_by_user", without["identity"]!!.jsonPrimitive.content)
         val summary = build(ExportOptions(includeDeviceIdentity = false)).summary
         assertFalse(summary.contains("Phone 1"))
@@ -152,7 +175,9 @@ class DiagnosticsReportBuilderTest {
     @Test
     fun optionalLogsFollowOptions() {
         assertTrue(build().entries.any { it.name == "logs/eden_log.txt" })
-        assertFalse(build(ExportOptions(includeEdenLog = false)).entries.any { it.name.startsWith("logs/") })
+        assertFalse(
+            build(ExportOptions(includeEdenLog = false)).entries.any { it.name.startsWith("logs/") }
+        )
     }
 
     @Test
@@ -168,7 +193,10 @@ class DiagnosticsReportBuilderTest {
         File(session, DiagnosticsSchema.STATIC_END_FILE).delete()
         val report = build().report
         assertEquals(JsonPrimitive(false), report["native_summary"]!!.jsonObject["available"])
-        assertEquals(3, report["android_summary"]!!.jsonObject["samples"]!!.jsonPrimitive.content.toInt())
+        assertEquals(
+            3,
+            report["android_summary"]!!.jsonObject["samples"]!!.jsonPrimitive.content.toInt()
+        )
     }
 
     @Test
@@ -179,9 +207,24 @@ class DiagnosticsReportBuilderTest {
         assertTrue(result is BundleResult.Success)
         ZipFile(destination).use { zip ->
             val names = zip.entries().toList().map { it.name }.toSet()
-            assertTrue(names.containsAll(setOf("report.json", "summary.txt", "README.txt", "samples.jsonl", "events.jsonl")))
-            val report = Json.parseToJsonElement(zip.getInputStream(zip.getEntry("report.json")).reader().readText())
-            assertEquals(DiagnosticsSchema.SCHEMA_VERSION, report.jsonObject["schema_version"]!!.jsonPrimitive.content.toInt())
+            assertTrue(
+                names.containsAll(
+                    setOf(
+                        "report.json",
+                        "summary.txt",
+                        "README.txt",
+                        "samples.jsonl",
+                        "events.jsonl"
+                    )
+                )
+            )
+            val report = Json.parseToJsonElement(
+                zip.getInputStream(zip.getEntry("report.json")).reader().readText()
+            )
+            assertEquals(
+                DiagnosticsSchema.SCHEMA_VERSION,
+                report.jsonObject["schema_version"]!!.jsonPrimitive.content.toInt()
+            )
         }
         assertFalse(File(root, "exports/bundle.zip.partial").exists())
     }

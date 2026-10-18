@@ -22,13 +22,19 @@ object DiagnosticsBundleWriter {
      * a truncated bundle behind.
      */
     fun write(plan: BundlePlan, destination: File): BundleResult {
-        val parent = destination.parentFile ?: return BundleResult.Failure("invalid_destination", null)
+        val parent = destination.parentFile ?: return BundleResult.Failure(
+            "invalid_destination",
+            null
+        )
         if (!parent.isDirectory && !parent.mkdirs()) {
             return BundleResult.Failure("cannot_create_directory", parent.name)
         }
         val required = plan.entries.sumOf { it.content.size.toLong() } + SPACE_MARGIN_BYTES
         if (parent.usableSpace < required) {
-            return BundleResult.Failure("insufficient_space", "${required / 1024 / 1024} MiB required")
+            return BundleResult.Failure(
+                "insufficient_space",
+                "${required / 1024 / 1024} MiB required"
+            )
         }
         val temporary = File(parent, destination.name + ".partial")
         try {

@@ -30,7 +30,8 @@ object DiagnosticsExporter {
         context.cacheDir.canonicalPath.let { known[it] = "<app_cache>" }
         context.applicationInfo.dataDir?.let { known[it] = "<app_data>" }
         context.applicationInfo.nativeLibraryDir?.let { known[it] = "<app_native_libs>" }
-        context.applicationInfo.sourceDir?.let { File(it).parent }?.let { known[it] = "<app_install_dir>" }
+        context.applicationInfo.sourceDir?.let { File(it).parent }
+            ?.let { known[it] = "<app_install_dir>" }
         return DiagnosticsRedactor(known)
     }
 
@@ -40,10 +41,26 @@ object DiagnosticsExporter {
             buildJsonObject {
                 put("collected_at_utc", DiagnosticsSession.utcNow())
                 put("app", DeviceInfoCollector.app())
-                put("device", runCatching { DeviceInfoCollector.device(context) }.getOrNull() ?: buildJsonObject {})
-                put("graphics_driver", runCatching { DeviceInfoCollector.graphicsDriver() }.getOrNull() ?: buildJsonObject {})
-                put("game", runCatching { DeviceInfoCollector.game(game) }.getOrNull() ?: buildJsonObject {})
-                put("native", DiagnosticsSession.parseNative(runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}")))
+                put(
+                    "device",
+                    runCatching { DeviceInfoCollector.device(context) }.getOrNull()
+                        ?: buildJsonObject {}
+                )
+                put(
+                    "graphics_driver",
+                    runCatching { DeviceInfoCollector.graphicsDriver() }.getOrNull()
+                        ?: buildJsonObject {}
+                )
+                put(
+                    "game",
+                    runCatching { DeviceInfoCollector.game(game) }.getOrNull() ?: buildJsonObject {}
+                )
+                put(
+                    "native",
+                    DiagnosticsSession.parseNative(
+                        runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}")
+                    )
+                )
                 put("metric_definitions", AndroidMetricsSampler.METRIC_DEFINITIONS)
             }
         } else {
@@ -53,14 +70,20 @@ object DiagnosticsExporter {
             sessionDir = session?.directory,
             edenLog = File(logDir, "eden_log.txt").takeIf { it.isFile },
             gpuLog = File(logDir, "eden_gpu.log").takeIf { it.isFile },
-            gpuCrashDumps = File(logDir, "gpu_crashes").listFiles()?.sortedBy { it.lastModified() }.orEmpty(),
+            gpuCrashDumps = File(logDir, "gpu_crashes").listFiles()
+                ?.sortedBy { it.lastModified() }.orEmpty(),
             exitReasons = exitReasons(context),
             snapshotStatic = snapshot,
             generatedAtUtc = DiagnosticsSession.utcNow()
         )
     }
 
-    fun plan(context: Context, session: SessionInfo?, options: ExportOptions, game: Game? = null): BundlePlan =
+    fun plan(
+        context: Context,
+        session: SessionInfo?,
+        options: ExportOptions,
+        game: Game? = null
+    ): BundlePlan =
         DiagnosticsReportBuilder(redactor(context), options).build(inputs(context, session, game))
 
     fun write(plan: BundlePlan, session: SessionInfo?): BundleResult {
@@ -82,7 +105,11 @@ object DiagnosticsExporter {
         }
         val activityManager = context.getSystemService(ActivityManager::class.java)
         val reasons = runCatching {
-            activityManager.getHistoricalProcessExitReasons(context.packageName, 0, MAX_EXIT_REASONS)
+            activityManager.getHistoricalProcessExitReasons(
+                context.packageName,
+                0,
+                MAX_EXIT_REASONS
+            )
         }.getOrElse { return DiagnosticsReportBuilder.unavailable(it.javaClass.simpleName) }
         return buildJsonArray {
             reasons.forEach { info ->

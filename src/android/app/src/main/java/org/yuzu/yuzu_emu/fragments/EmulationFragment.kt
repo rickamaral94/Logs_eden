@@ -68,6 +68,7 @@ import kotlinx.coroutines.withContext
 import org.yuzu.yuzu_emu.HomeNavigationDirections
 import org.yuzu.yuzu_emu.NativeLibrary
 import org.yuzu.yuzu_emu.R
+import org.yuzu.yuzu_emu.diagnostics.DiagnosticsSession
 import org.yuzu.yuzu_emu.activities.EmulationActivity
 import org.yuzu.yuzu_emu.databinding.DialogOverlayAdjustBinding
 import org.yuzu.yuzu_emu.databinding.FragmentEmulationBinding
@@ -828,6 +829,12 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
                 R.id.menu_overlay_controls -> {
                     showOverlayOptions()
+                    true
+                }
+
+                R.id.menu_diagnostics -> {
+                    DiagnosticsDialogFragment.newInstance(args.game)
+                        .show(childFragmentManager, DiagnosticsDialogFragment.TAG)
                     true
                 }
 
@@ -2297,6 +2304,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
         @Synchronized
         fun stop() {
+            DiagnosticsSession.onEmulationStopped()
             if (state != State.STOPPED) {
                 Log.debug("[EmulationFragment] Stopping emulation.")
                 NativeLibrary.stopEmulation()

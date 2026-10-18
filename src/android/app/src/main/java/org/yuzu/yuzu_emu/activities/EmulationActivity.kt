@@ -28,6 +28,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.navigation.NavOptions
+import org.yuzu.yuzu_emu.diagnostics.DiagnosticsSession
 import org.yuzu.yuzu_emu.fragments.EmulationFragment
 import org.yuzu.yuzu_emu.utils.CustomSettingsHandler
 import android.util.Rational
@@ -265,6 +266,7 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener, InputManager
         inputManager.unregisterInputDeviceListener(this)
         stopForegroundService(this)
         NativeLibrary.playTimeManagerStop()
+        DiagnosticsSession.onEmulationStopped()
     }
 
     override fun onUserLeaveHint() {

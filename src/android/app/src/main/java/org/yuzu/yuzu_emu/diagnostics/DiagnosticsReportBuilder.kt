@@ -56,7 +56,8 @@ class DiagnosticsReportBuilder(
         val meta = dir?.let { readJson(File(it, DiagnosticsSchema.SESSION_FILE)) }?.asObject()
         val staticStart = dir?.let { readJson(File(it, DiagnosticsSchema.STATIC_START_FILE)) }
             ?.asObject() ?: inputs.snapshotStatic
-        val staticEnd = dir?.let { readJson(File(it, DiagnosticsSchema.STATIC_END_FILE)) }?.asObject()
+        val staticEnd = dir?.let { readJson(File(it, DiagnosticsSchema.STATIC_END_FILE)) }
+            ?.asObject()
         val samples = dir?.let { readJsonLines(File(it, DiagnosticsSchema.SAMPLES_FILE)) }.orEmpty()
         val events = dir?.let { readJsonLines(File(it, DiagnosticsSchema.EVENTS_FILE)) }.orEmpty()
         val criticalFiles = dir?.listFiles { f ->
@@ -88,16 +89,28 @@ class DiagnosticsReportBuilder(
             put(
                 "vulkan",
                 buildJsonObject {
-                    put("device", sections?.get("vulkan_device") ?: unavailable("renderer not initialized"))
-                    put("swapchain", sections?.get("vulkan_swapchain") ?: unavailable("no swapchain created"))
-                    put("shader_cache", sections?.get("shader_cache") ?: unavailable("no title loaded"))
+                    put(
+                        "device",
+                        sections?.get("vulkan_device") ?: unavailable("renderer not initialized")
+                    )
+                    put(
+                        "swapchain",
+                        sections?.get("vulkan_swapchain") ?: unavailable("no swapchain created")
+                    )
+                    put(
+                        "shader_cache",
+                        sections?.get("shader_cache") ?: unavailable("no title loaded")
+                    )
                     put("memory_budget_peak", memoryBudgetPeak(samples))
                 }
             )
             put("native_summary", nativeSummary)
             put("android_summary", androidSummary(samples))
             put("frame_rate", frameRate(samples))
-            put("markers", buildJsonArray { markers.forEach { add(markerWithContext(it, samples)) } })
+            put(
+                "markers",
+                buildJsonArray { markers.forEach { add(markerWithContext(it, samples)) } }
+            )
             put(
                 "events",
                 buildJsonObject {
@@ -118,14 +131,16 @@ class DiagnosticsReportBuilder(
             entries += BundleEntry(
                 DiagnosticsSchema.SAMPLES_FILE,
                 "Metric samples, one JSON object per line",
-                redactor.redactPaths(File(dir, DiagnosticsSchema.SAMPLES_FILE).readText()).toByteArray()
+                redactor.redactPaths(File(dir, DiagnosticsSchema.SAMPLES_FILE).readText())
+                    .toByteArray()
             )
         }
         if (events.isNotEmpty()) {
             entries += BundleEntry(
                 DiagnosticsSchema.EVENTS_FILE,
                 "Capture, user marker and Android system events",
-                redactor.redactText(File(dir, DiagnosticsSchema.EVENTS_FILE).readText()).toByteArray()
+                redactor.redactText(File(dir, DiagnosticsSchema.EVENTS_FILE).readText())
+                    .toByteArray()
             )
         }
         criticalFiles.forEach {
@@ -137,18 +152,30 @@ class DiagnosticsReportBuilder(
         }
         if (options.includeEdenLog) {
             inputs.edenLog?.let { tail(it, MAX_LOG_BYTES) }?.let {
-                entries += BundleEntry("logs/eden_log.txt", "Eden log (last ${MAX_LOG_BYTES / 1024 / 1024} MiB)", redactor.redactText(it).toByteArray())
+                entries += BundleEntry(
+                    "logs/eden_log.txt",
+                    "Eden log (last ${MAX_LOG_BYTES / 1024 / 1024} MiB)",
+                    redactor.redactText(it).toByteArray()
+                )
             }
         }
         if (options.includeGpuLog) {
             inputs.gpuLog?.let { tail(it, MAX_LOG_BYTES) }?.let {
-                entries += BundleEntry("logs/eden_gpu.log", "Eden GPU log", redactor.redactText(it).toByteArray())
+                entries += BundleEntry(
+                    "logs/eden_gpu.log",
+                    "Eden GPU log",
+                    redactor.redactText(it).toByteArray()
+                )
             }
         }
         if (options.includeAdvancedDumps) {
             inputs.gpuCrashDumps.takeLast(MAX_DUMPS).forEach { dump ->
                 tail(dump, MAX_LOG_BYTES)?.let {
-                    entries += BundleEntry("advanced/gpu_crashes/${dump.name}", "GPU logger state dump", redactor.redactText(it).toByteArray())
+                    entries += BundleEntry(
+                        "advanced/gpu_crashes/${dump.name}",
+                        "GPU logger state dump",
+                        redactor.redactText(it).toByteArray()
+                    )
                 }
             }
         }
@@ -165,7 +192,11 @@ class DiagnosticsReportBuilder(
             )
         )
         val all = listOf(
-            BundleEntry(DiagnosticsSchema.REPORT_FILE, "", pretty.encodeToString(JsonElement.serializer(), finalReport).toByteArray()),
+            BundleEntry(
+                DiagnosticsSchema.REPORT_FILE,
+                "",
+                pretty.encodeToString(JsonElement.serializer(), finalReport).toByteArray()
+            ),
             BundleEntry(DiagnosticsSchema.SUMMARY_FILE, "", summary.toByteArray()),
             BundleEntry(DiagnosticsSchema.README_FILE, "", readme().toByteArray())
         ) + entries
@@ -180,10 +211,11 @@ class DiagnosticsReportBuilder(
         return JsonObject(obj - "identity" + ("identity" to JsonPrimitive("removed_by_user")))
     }
 
-    private fun gameSection(frontend: JsonElement?, native: JsonElement?): JsonElement = buildJsonObject {
-        put("frontend", frontend ?: JsonNull)
-        put("native", native ?: JsonNull)
-    }
+    private fun gameSection(frontend: JsonElement?, native: JsonElement?): JsonElement =
+        buildJsonObject {
+            put("frontend", frontend ?: JsonNull)
+            put("native", native ?: JsonNull)
+        }
 
     private fun privacySection(): JsonObject = buildJsonObject {
         put("redaction_applied", true)
@@ -192,14 +224,32 @@ class DiagnosticsReportBuilder(
         put(
             "never_included",
             buildJsonArray {
-                listOf("roms", "firmware", "keys", "saves", "credentials", "web_service_token", "memory_dumps")
+                listOf(
+                    "roms",
+                    "firmware",
+                    "keys",
+                    "saves",
+                    "credentials",
+                    "web_service_token",
+                    "memory_dumps"
+                )
                     .forEach { add(it) }
             }
         )
         put(
             "excluded_setting_categories",
             buildJsonArray {
-                listOf("Paths", "DataStorage", "WebService", "Multiplayer", "Network", "Controls", "Shortcuts", "Ui*", "Screenshots")
+                listOf(
+                    "Paths",
+                    "DataStorage",
+                    "WebService",
+                    "Multiplayer",
+                    "Network",
+                    "Controls",
+                    "Shortcuts",
+                    "Ui*",
+                    "Screenshots"
+                )
                     .forEach { add(it) }
             }
         )
@@ -219,7 +269,10 @@ class DiagnosticsReportBuilder(
         }
         return buildJsonObject {
             put("samples", samples.size)
-            put("process_cpu_pct_of_one_core", stats(process.mapNotNull { it.num("cpu_pct_of_one_core") }))
+            put(
+                "process_cpu_pct_of_one_core",
+                stats(process.mapNotNull { it.num("cpu_pct_of_one_core") })
+            )
             put(
                 "thread_category_cpu_pct_of_one_core",
                 JsonObject(categories.mapValues { stats(it.value) })
@@ -228,14 +281,26 @@ class DiagnosticsReportBuilder(
             put("rss_peak_kb_max", memory.mapNotNull { it.num("rss_peak_kb") }.maxOrNull())
             put("pss_kb", stats(memory.mapNotNull { it.num("pss_kb") }))
             put("java_heap_used_kb", stats(memory.mapNotNull { it.num("java_heap_used_kb") }))
-            put("native_heap_allocated_kb", stats(memory.mapNotNull { it.num("native_heap_allocated_kb") }))
+            put(
+                "native_heap_allocated_kb",
+                stats(memory.mapNotNull { it.num("native_heap_allocated_kb") })
+            )
             put("gc_count_total", gc.mapNotNull { it.num("gc_count") }.sum())
             put("gc_time_ms_total", gc.mapNotNull { it.num("gc_time_ms") }.sum())
             put("blocking_gc_count_total", gc.mapNotNull { it.num("blocking_gc_count") }.sum())
-            put("system_mem_available_kb_min", system.mapNotNull { it.num("mem_available_kb") }.minOrNull())
-            put("system_low_memory_samples", system.count { (it["low_memory"] as? JsonPrimitive)?.content == "true" })
+            put(
+                "system_mem_available_kb_min",
+                system.mapNotNull { it.num("mem_available_kb") }.minOrNull()
+            )
+            put(
+                "system_low_memory_samples",
+                system.count { (it["low_memory"] as? JsonPrimitive)?.content == "true" }
+            )
             put("thermal_status_max", system.mapNotNull { it.num("thermal_status") }.maxOrNull())
-            put("thermal_headroom_max", system.mapNotNull { it.num("thermal_headroom") }.maxOrNull())
+            put(
+                "thermal_headroom_max",
+                system.mapNotNull { it.num("thermal_headroom") }.maxOrNull()
+            )
             put("battery_temp_c_max", system.mapNotNull { it.num("battery_temp_c") }.maxOrNull())
             put("gpu_busy_pct_kgsl", stats(system.mapNotNull { it.num("gpu_busy_pct_kgsl") }))
             put("sampler_cost_ms", stats(android.mapNotNull { it.num("sampler_cost_ms") }))
@@ -315,7 +380,7 @@ class DiagnosticsReportBuilder(
 
     /** Aggregates the samples around a marker. Correlation only: no cause is inferred. */
     private fun markerWithContext(marker: JsonObject, samples: List<JsonObject>): JsonObject {
-        val t = marker.num("t_ms") ?: return marker
+        val t = marker.num("noticed_t_ms") ?: marker.num("t_ms") ?: return marker
         val nearby = samples.filter {
             val st = it.num("t_ms") ?: return@filter false
             st >= t - MARKER_BEFORE_MS && st <= t + MARKER_AFTER_MS
@@ -345,6 +410,7 @@ class DiagnosticsReportBuilder(
             put("category", marker["category"] ?: JsonNull)
             put("note", redactor.redactText(note))
             put("t_ms", t.toLong())
+            put("recorded_t_ms", marker["t_ms"] ?: JsonNull)
             put("utc", marker["utc"] ?: JsonNull)
             put(
                 "context",
@@ -356,13 +422,34 @@ class DiagnosticsReportBuilder(
                     put("guest_frames_over_50ms", over50.toLong())
                     put(
                         "timers_total_us",
-                        JsonObject(timers.filterValues { it.first > 0 }.mapValues { JsonPrimitive(it.value.first.toLong()) })
+                        JsonObject(
+                            timers.filterValues { it.first > 0 }.mapValues {
+                                JsonPrimitive(
+                                    it.value.first.toLong()
+                                )
+                            }
+                        )
                     )
                     put(
                         "timers_max_us",
-                        JsonObject(timers.filterValues { it.second > 0 }.mapValues { JsonPrimitive(it.value.second.toLong()) })
+                        JsonObject(
+                            timers.filterValues { it.second > 0 }.mapValues {
+                                JsonPrimitive(
+                                    it.value.second.toLong()
+                                )
+                            }
+                        )
                     )
-                    put("counters", JsonObject(counters.filterValues { it > 0 }.mapValues { JsonPrimitive(it.value.toLong()) }))
+                    put(
+                        "counters",
+                        JsonObject(
+                            counters.filterValues { it > 0 }.mapValues {
+                                JsonPrimitive(
+                                    it.value.toLong()
+                                )
+                            }
+                        )
+                    )
                     put("note", "metrics recorded near the marker; they are not a diagnosis")
                 }
             )
@@ -372,7 +459,8 @@ class DiagnosticsReportBuilder(
     private fun availability(samples: List<JsonObject>): JsonObject {
         val result = sortedMapOf<String, String>()
         samples.forEach { sample ->
-            sample["android"]?.asObject()?.get("availability")?.asObject()?.forEach { (key, value) ->
+            val entries = sample["android"]?.asObject()?.get("availability")?.asObject()
+            entries?.forEach { (key, value) ->
                 val text = (value as? JsonPrimitive)?.content ?: return@forEach
                 // Keep the first "unavailable" reason; a metric that was available at least once
                 // is reported as intermittently available.
@@ -391,18 +479,25 @@ class DiagnosticsReportBuilder(
         val session = report["session"]?.asObject()
         val device = report["device"]?.asObject()
         val identity = device?.get("identity")?.asObject()
-        val vulkan = report["vulkan"]?.asObject()?.get("device")?.asObject()
-        val driver = vulkan?.get("driver")?.asObject()
-        val swapchain = report["vulkan"]?.asObject()?.get("swapchain")?.asObject()
-        val cache = report["vulkan"]?.asObject()?.get("shader_cache")?.asObject()
+        val vulkan = report["vulkan"]?.asObject()
+        val vkDevice = vulkan?.get("device")?.asObject()
+        val driver = vkDevice?.get("driver")?.asObject()
+        val swapchain = vulkan?.get("swapchain")?.asObject()
+        val cache = vulkan?.get("shader_cache")?.asObject()
         val build = report["build"]?.asObject()
         val game = report["game"]?.asObject()?.get("frontend")?.asObject()
-        val frames = report["native_summary"]?.asObject()?.get("frames")?.asObject()
+        val nativeSummary = report["native_summary"]?.asObject()
+        val frames = nativeSummary?.get("frames")?.asObject()
             ?.get("guest_present_interval")?.asObject()
+        val counters = nativeSummary?.get("counters")?.asObject()
+        val timers = nativeSummary?.get("timers")?.asObject()
         val fps = report["frame_rate"]?.asObject()
-        val counters = report["native_summary"]?.asObject()?.get("counters")?.asObject()
-        val timers = report["native_summary"]?.asObject()?.get("timers")?.asObject()
         val android = report["android_summary"]?.asObject()
+        val cpu = android?.get("process_cpu_pct_of_one_core")?.asObject()
+        val samplerCost = android?.get("sampler_cost_ms")?.asObject()
+        val duration = session.num("duration_ms")?.let { fmt(it / 1000.0) + " s" } ?: "?"
+        val deviceName = identity?.let { "${it.str("manufacturer")} ${it.str("model")}" }
+            ?: "identity removed"
 
         return buildString {
             appendLine("Eden diagnostic report (schema ${DiagnosticsSchema.SCHEMA_VERSION})")
@@ -410,53 +505,102 @@ class DiagnosticsReportBuilder(
             appendLine()
             appendLine("== Session ==")
             appendLine("State: ${session.str("state")}  End reason: ${session.str("end_reason")}")
-            appendLine("Started: ${session.str("started_at_utc")}  Duration: ${session.num("duration_ms")?.let { fmt(it / 1000.0) + " s" } ?: "?"}")
-            appendLine("Level: ${session.str("level")}  Samples: $sampleCount  Markers: $markerCount")
-            session.str("stage_note").takeIf { it.isNotBlank() && it != "?" }?.let { appendLine("In-game stage: ${redactor.redactText(it)}") }
+            appendLine("Started: ${session.str("started_at_utc")}  Duration: $duration")
+            appendLine(
+                "Level: ${session.str("level")}  Samples: $sampleCount  Markers: $markerCount"
+            )
+            val stage = session.str("stage_note")
+            if (stage.isNotBlank() && stage != "?") {
+                appendLine("In-game stage: ${redactor.redactText(stage)}")
+            }
             appendLine()
             appendLine("== Build / device ==")
-            appendLine("Eden: ${build.str("version")} (${build.str("description")}, ${build.str("branch")})")
-            appendLine("Device: ${identity?.let { "${it.str("manufacturer")} ${it.str("model")}" } ?: "identity removed"}  SoC: ${device.str("soc_model")}")
-            appendLine("Android: ${device.str("android_release")} (API ${device.str("android_api")})  Kernel: ${device.str("kernel")}")
+            appendLine("Eden: ${build.str("version")} (${build.str("description")})")
+            appendLine("Branch: ${build.str("branch")}")
+            appendLine("Device: $deviceName  SoC: ${device.str("soc_model")}")
+            appendLine(
+                "Android: ${device.str("android_release")} (API ${device.str("android_api")})"
+            )
+            appendLine("Kernel: ${device.str("kernel")}")
             appendLine("CPU backend: ${report.str("cpu_backend")}")
             appendLine()
             appendLine("== Game ==")
             appendLine("${game.str("title")}  [${game.str("program_id")}]")
             appendLine()
             appendLine("== Vulkan ==")
-            appendLine("GPU: ${vulkan.str("device_name")}  API ${vulkan.str("api_version")}")
+            appendLine("GPU: ${vkDevice.str("device_name")}  API ${vkDevice.str("api_version")}")
             appendLine("Driver: ${driver.str("id")} ${driver.str("name")} ${driver.str("info")}")
-            appendLine("Swapchain: ${swapchain.str("width")}x${swapchain.str("height")} ${swapchain.str("format")} ${swapchain.str("present_mode")} images=${swapchain.str("image_count")}")
-            appendLine("Shader cache: in file=${cache.str("pipelines_in_file")} restored=${cache.str("pipelines_restored")} driver cache=${cache.str("vulkan_driver_cache_bytes")} B")
+            appendLine(
+                "Swapchain: ${swapchain.str("width")}x${swapchain.str("height")} " +
+                    "${swapchain.str("format")} ${swapchain.str("present_mode")} " +
+                    "images=${swapchain.str("image_count")}"
+            )
+            appendLine(
+                "Shader cache: in file=${cache.str("pipelines_in_file")} " +
+                    "restored=${cache.str("pipelines_restored")} " +
+                    "driver cache=${cache.str("vulkan_driver_cache_bytes")} B"
+            )
             appendLine()
             appendLine("== Frames (CPU wall clock) ==")
-            appendLine("Guest present FPS avg: ${fps.num("guest_present_fps_avg")?.let(::fmt) ?: "n/a"}  Game FPS avg: ${fps.num("game_fps_avg")?.let(::fmt) ?: "n/a"}")
-            appendLine("Guest frame interval p50/p90/p99/max ms: ${frames.str("p50_ms")} / ${frames.str("p90_ms")} / ${frames.str("p99_ms")} / ${frames.str("max_ms")}")
+            appendLine(
+                "Guest present FPS avg: ${fps.num("guest_present_fps_avg")?.let(::fmt) ?: "n/a"}"
+            )
+            appendLine("Game FPS avg: ${fps.num("game_fps_avg")?.let(::fmt) ?: "n/a"}")
+            appendLine(
+                "Guest frame interval p50/p90/p99/max ms: ${frames.str("p50_ms")} / " +
+                    "${frames.str("p90_ms")} / ${frames.str("p99_ms")} / ${frames.str("max_ms")}"
+            )
             appendLine()
             appendLine("== Shaders / pipelines ==")
-            appendLine("Runtime graphics misses: ${counters.str("graphics_pipeline_cache_miss")}  compute misses: ${counters.str("compute_pipeline_cache_miss")}")
-            appendLine("Draws skipped while pipelines build: ${counters.str("draw_skipped_pipeline_pending")}  create failures: ${counters.str("pipeline_create_failed")}  translate failures: ${counters.str("shader_translate_failed")}")
-            listOf("pipeline_build_wait", "fence_wait", "queue_submit", "graphics_shader_translate", "graphics_pipeline_create").forEach { name ->
+            appendLine(
+                "Runtime misses: graphics=${counters.str("graphics_pipeline_cache_miss")} " +
+                    "compute=${counters.str("compute_pipeline_cache_miss")}"
+            )
+            appendLine(
+                "Draws skipped while pipelines build: " +
+                    counters.str("draw_skipped_pipeline_pending")
+            )
+            appendLine(
+                "Failures: create=${counters.str("pipeline_create_failed")} " +
+                    "translate=${counters.str("shader_translate_failed")}"
+            )
+            SUMMARY_TIMERS.forEach { name ->
                 val t = timers?.get(name)?.asObject()
-                appendLine("  $name: count=${t.str("count")} total=${t.str("total_us")} µs max=${t.str("max_us")} µs")
+                appendLine(
+                    "  $name: count=${t.str("count")} total=${t.str("total_us")} µs " +
+                        "max=${t.str("max_us")} µs"
+                )
             }
             appendLine()
             appendLine("== Process / system ==")
-            val cpu = android?.get("process_cpu_pct_of_one_core")?.asObject()
             appendLine("Process CPU (% of one core) avg/max: ${cpu.str("avg")} / ${cpu.str("max")}")
-            appendLine("RSS peak (VmHWM): ${android.str("rss_peak_kb_max")} KiB  Min available system memory: ${android.str("system_mem_available_kb_min")} KiB")
-            appendLine("Max thermal status: ${android.str("thermal_status_max")}  Max battery temp: ${android.str("battery_temp_c_max")} °C")
-            appendLine("Sampler cost avg/max ms: ${android?.get("sampler_cost_ms")?.asObject().str("avg")} / ${android?.get("sampler_cost_ms")?.asObject().str("max")}")
+            appendLine("RSS peak (VmHWM): ${android.str("rss_peak_kb_max")} KiB")
+            appendLine(
+                "Min available system memory: ${android.str("system_mem_available_kb_min")} KiB"
+            )
+            appendLine("Max thermal status: ${android.str("thermal_status_max")}")
+            appendLine("Max battery temperature: ${android.str("battery_temp_c_max")} °C")
+            appendLine(
+                "Sampler cost avg/max ms: ${samplerCost.str("avg")} / ${samplerCost.str("max")}"
+            )
             appendLine()
             appendLine("== Markers ==")
             (report["markers"] as? JsonArray)?.forEach { m ->
                 val marker = m.asObject() ?: return@forEach
                 val context = marker["context"]?.asObject()
-                appendLine("t=${marker.str("t_ms")} ms  ${marker.str("category")}: ${marker.str("note")}")
-                appendLine("    nearby: max guest frame ${context.str("guest_frame_interval_max_ms")} ms, frames over 50 ms ${context.str("guest_frames_over_50ms")}, counters ${context?.get("counters") ?: "{}"}")
+                appendLine(
+                    "t=${marker.str("t_ms")} ms  ${marker.str("category")}: ${marker.str("note")}"
+                )
+                appendLine(
+                    "    nearby: max guest frame " +
+                        "${context.str("guest_frame_interval_max_ms")} ms, " +
+                        "frames over 50 ms ${context.str("guest_frames_over_50ms")}"
+                )
+                appendLine("    counters: ${context?.get("counters") ?: "{}"}")
             }
             appendLine()
-            appendLine("Times in this report are CPU-side measurements unless stated otherwise; they are not GPU execution times.")
+            appendLine("Times in this report are CPU-side measurements unless stated otherwise;")
+            appendLine("they are not GPU execution times.")
         }
     }
 
@@ -478,7 +622,13 @@ class DiagnosticsReportBuilder(
     private fun redactStructured(element: JsonElement): JsonElement = when (element) {
         is JsonObject -> JsonObject(element.mapValues { redactStructured(it.value) })
         is JsonArray -> JsonArray(element.map { redactStructured(it) })
-        is JsonPrimitive -> if (element.isString) JsonPrimitive(redactor.redactPaths(element.content)) else element
+        is JsonPrimitive -> if (element.isString) {
+            JsonPrimitive(
+                redactor.redactPaths(element.content)
+            )
+        } else {
+            element
+        }
         else -> element
     }
 
@@ -493,6 +643,13 @@ class DiagnosticsReportBuilder(
         const val MAX_DUMPS = 3
         const val MARKER_BEFORE_MS = 10_000L
         const val MARKER_AFTER_MS = 5_000L
+        private val SUMMARY_TIMERS = listOf(
+            "pipeline_build_wait",
+            "fence_wait",
+            "queue_submit",
+            "graphics_shader_translate",
+            "graphics_pipeline_create"
+        )
 
         fun unavailable(reason: String): JsonObject = buildJsonObject {
             put("available", false)
@@ -526,11 +683,18 @@ class DiagnosticsReportBuilder(
                 it.readFully(bytes)
             }
             val text = String(bytes, Charsets.UTF_8)
-            return "[truncated: first ${length - maxBytes} bytes omitted]\n" + text.substringAfter('\n', text)
+            return "[truncated: first ${length - maxBytes} bytes omitted]\n" + text.substringAfter(
+                '\n',
+                text
+            )
         }
 
         fun readJson(file: File): JsonElement? =
-            if (file.isFile) runCatching { Json.parseToJsonElement(file.readText()) }.getOrNull() else null
+            if (file.isFile) {
+                runCatching { Json.parseToJsonElement(file.readText()) }.getOrNull()
+            } else {
+                null
+            }
 
         /** Reads JSON lines, skipping a truncated last line left by an interrupted capture. */
         fun readJsonLines(file: File): List<JsonObject> {
@@ -539,7 +703,9 @@ class DiagnosticsReportBuilder(
             }
             return file.useLines { lines ->
                 lines.filter { it.isNotBlank() }
-                    .mapNotNull { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+                    .mapNotNull {
+                        runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull()
+                    }
                     .toList()
             }
         }

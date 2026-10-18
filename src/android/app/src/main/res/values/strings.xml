@@ -1887,4 +1887,56 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     <string name="add_folders">Add Folder</string>
     <string name="percent">%1$d%%</string>
 
+    <!-- Diagnostics -->
+    <string name="diagnostics">Diagnostics</string>
+    <string name="diagnostics_description">Records Vulkan, CPU, memory and frame time data while you play, so graphical or performance problems can be reproduced and compared. Detailed level samples more often and adds PSS memory readings.</string>
+    <string name="diagnostics_status_idle">Not capturing</string>
+    <string name="diagnostics_status_capturing">Capturing: %1$s, %2$d marker(s)</string>
+    <string name="diagnostics_level_standard">Standard (every 2 s, low overhead)</string>
+    <string name="diagnostics_level_detailed">Detailed (every 1 s, includes PSS)</string>
+    <string name="diagnostics_stage_hint">Where are you in the game? (optional)</string>
+    <string name="diagnostics_local_notice">Captures stay on this device. Nothing is sent anywhere unless you export and share a bundle yourself. Captures stop after 30 minutes.</string>
+    <string name="diagnostics_start">Start capture</string>
+    <string name="diagnostics_stop">Stop capture</string>
+    <string name="diagnostics_mark_issue">Mark issue</string>
+    <string name="diagnostics_marker_category">What did you see?</string>
+    <string name="diagnostics_marker_note">Describe the problem (optional)</string>
+    <string name="diagnostics_marker_saved">Issue marked</string>
+    <string name="diagnostics_start_failed">Could not start the capture: %1$s</string>
+    <string name="diagnostics_review_export">Review and export</string>
+    <string name="diagnostics_include_eden_log">Include Eden log (last 4 MiB)</string>
+    <string name="diagnostics_include_gpu_log">Include GPU log, if present</string>
+    <string name="diagnostics_include_identity">Include device model and build fingerprint</string>
+    <string name="diagnostics_include_advanced">Include advanced GPU logger dumps</string>
+    <string name="diagnostics_advanced_description">GPU logger dumps contain recent Vulkan calls and pipeline state written by the GPU logging setting. They can be large. Memory dumps are never collected.</string>
+    <string name="diagnostics_preview_loading">Preparing preview…</string>
+    <string name="diagnostics_preview_contents">Files in the bundle:</string>
+    <string name="diagnostics_preview_redaction">Paths, URIs, e-mail and network addresses are redacted (%1$d values). ROMs, firmware, keys, saves and credentials are never included.</string>
+    <string name="diagnostics_export_share">Export and share</string>
+    <string name="diagnostics_export_failed">Export failed: %1$s</string>
+    <string name="diagnostics_export_saved">Bundle saved to diagnostics/exports</string>
+    <string name="diagnostics_delete">Delete capture</string>
+    <string name="diagnostics_sessions">Diagnostic captures</string>
+    <string name="diagnostics_sessions_description">Review, export or delete diagnostic captures</string>
+    <string name="diagnostics_sessions_empty">No captures yet. Start one from the in-game menu.</string>
+    <string name="diagnostics_snapshot">Snapshot report</string>
+    <string name="diagnostics_session_item">%1$s · %2$s · %3$s · %4$d marker(s)</string>
+    <string name="diagnostics_state_completed">completed</string>
+    <string name="diagnostics_state_interrupted">interrupted</string>
+    <string name="diagnostics_state_active">in progress</string>
+    <string-array name="diagnostics_issue_categories">
+        <item>Missing textures</item>
+        <item>Wrong colors</item>
+        <item>Artifacts</item>
+        <item>Flicker</item>
+        <item>Distorted geometry</item>
+        <item>Black screen</item>
+        <item>Shader stutter</item>
+        <item>FPS drop</item>
+        <item>Stutter</item>
+        <item>Freeze</item>
+        <item>Audio problem</item>
+        <item>Other</item>
+    </string-array>
+
 </resources>

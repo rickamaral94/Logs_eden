@@ -94,7 +94,10 @@ object DeviceInfoCollector {
         }
         return buildJsonObject {
             put("selection", if (custom != null) "custom" else "system")
-            put("custom_driver_loading_supported", runCatching { GpuDriverHelper.supportsCustomDriverLoading() }.getOrNull())
+            put(
+                "custom_driver_loading_supported",
+                runCatching { GpuDriverHelper.supportsCustomDriverLoading() }.getOrNull()
+            )
             if (custom != null) {
                 put(
                     "custom",

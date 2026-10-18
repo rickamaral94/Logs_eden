@@ -109,7 +109,11 @@ object DiagnosticsSession {
     fun isCapturing(): Boolean = _state.value is CaptureState.Capturing
 
     /** Starts a capture. Returns null on success or a short, user-presentable failure reason. */
-    fun start(context: Context, options: CaptureOptions, game: Game?): String? = synchronized(lock) {
+    fun start(
+        context: Context,
+        options: CaptureOptions,
+        game: Game?
+    ): String? = synchronized(lock) {
         if (isCapturing()) {
             return "already_capturing"
         }
@@ -127,7 +131,9 @@ object DiagnosticsSession {
         }
 
         val app = context.applicationContext
-        val nativeStatic = parseNative(runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}"))
+        val nativeStatic = parseNative(
+            runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}")
+        )
         val meta = buildJsonObject {
             put("session_format_version", DiagnosticsSchema.SESSION_FORMAT_VERSION)
             put("session_id", id)
@@ -141,17 +147,30 @@ object DiagnosticsSession {
             put("game_title", game?.title)
         }
         try {
-            File(dir, DiagnosticsSchema.SESSION_FILE).writeText(pretty.encodeToString(JsonElement.serializer(), meta))
+            File(dir, DiagnosticsSchema.SESSION_FILE).writeText(
+                pretty.encodeToString(JsonElement.serializer(), meta)
+            )
             val static = buildJsonObject {
                 put("collected_at_utc", utcNow())
                 put("app", DeviceInfoCollector.app())
-                put("device", runCatching { DeviceInfoCollector.device(app) }.getOrElse { errorJson(it) })
-                put("graphics_driver", runCatching { DeviceInfoCollector.graphicsDriver() }.getOrElse { errorJson(it) })
-                put("game", runCatching { DeviceInfoCollector.game(game) }.getOrElse { errorJson(it) })
+                put(
+                    "device",
+                    runCatching { DeviceInfoCollector.device(app) }.getOrElse { errorJson(it) }
+                )
+                put(
+                    "graphics_driver",
+                    runCatching { DeviceInfoCollector.graphicsDriver() }.getOrElse { errorJson(it) }
+                )
+                put(
+                    "game",
+                    runCatching { DeviceInfoCollector.game(game) }.getOrElse { errorJson(it) }
+                )
                 put("native", nativeStatic)
                 put("metric_definitions", AndroidMetricsSampler.METRIC_DEFINITIONS)
             }
-            File(dir, DiagnosticsSchema.STATIC_START_FILE).writeText(pretty.encodeToString(JsonElement.serializer(), static))
+            File(dir, DiagnosticsSchema.STATIC_START_FILE).writeText(
+                pretty.encodeToString(JsonElement.serializer(), static)
+            )
         } catch (e: IOException) {
             dir.deleteRecursively()
             return "write_failed"
@@ -170,10 +189,12 @@ object DiagnosticsSession {
         sampleCount = 0
         registerSystemCallbacks(app)
         _state.value = CaptureState.Capturing(id, startedUptimeMs, options.level, 0)
-        appendEvent(buildJsonObject {
-            put("type", "capture_started")
-            put("level", options.level.id)
-        })
+        appendEvent(
+            buildJsonObject {
+                put("type", "capture_started")
+                put("level", options.level.id)
+            }
+        )
 
         val sampler = AndroidMetricsSampler(app, options.level == CaptureLevel.Detailed)
         samplingJob = scope.launch {
@@ -183,7 +204,8 @@ object DiagnosticsSession {
                     break
                 }
                 val reason = writeSample(sampler)
-                if (reason == null && SystemClock.uptimeMillis() - startedUptimeMs >= options.maxDurationMs) {
+                val elapsed = SystemClock.uptimeMillis() - startedUptimeMs
+                if (reason == null && elapsed >= options.maxDurationMs) {
                     stop("duration_limit")
                     break
                 }
@@ -197,18 +219,24 @@ object DiagnosticsSession {
         null
     }
 
-    /** Marks the moment the user noticed a problem. Returns the marker id, or null when idle. */
-    fun mark(category: String, note: String): Long? = synchronized(lock) {
+    /**
+     * Marks the moment the user noticed a problem, [noticedMsAgo] before now (the time spent
+     * filling in the marker dialog). Returns the marker id, or null when idle.
+     */
+    fun mark(category: String, note: String, noticedMsAgo: Long = 0): Long? = synchronized(lock) {
         val current = _state.value as? CaptureState.Capturing ?: return null
-        val markerId = SystemClock.uptimeMillis()
+        val markerId = SystemClock.uptimeMillis() - noticedMsAgo.coerceAtLeast(0)
         runCatching { NativeDiagnostics.recordMarker(markerId, category) }
         markerCount++
-        appendEvent(buildJsonObject {
-            put("type", "user_marker")
-            put("marker_id", markerId)
-            put("category", category)
-            put("note", note)
-        })
+        appendEvent(
+            buildJsonObject {
+                put("type", "user_marker")
+                put("marker_id", markerId)
+                put("noticed_t_ms", markerId - startedUptimeMs)
+                put("category", category)
+                put("note", note)
+            }
+        )
         _state.value = current.copy(markers = markerCount)
         markerId
     }
@@ -220,12 +248,18 @@ object DiagnosticsSession {
             samplingJob = null
             appContext?.let { unregisterSystemCallbacks(it) }
 
-            appendEvent(buildJsonObject {
-                put("type", "capture_stopped")
-                put("reason", reason)
-            })
-            val summary = parseNative(runCatching { NativeDiagnostics.sessionSummary() }.getOrDefault("{}"))
-            val nativeStatic = parseNative(runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}"))
+            appendEvent(
+                buildJsonObject {
+                    put("type", "capture_stopped")
+                    put("reason", reason)
+                }
+            )
+            val summary = parseNative(
+                runCatching { NativeDiagnostics.sessionSummary() }.getOrDefault("{}")
+            )
+            val nativeStatic = parseNative(
+                runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}")
+            )
             runCatching { NativeDiagnostics.stopCapture() }
 
             val endUptime = SystemClock.uptimeMillis()
@@ -294,14 +328,19 @@ object DiagnosticsSession {
                         "duration_ms" to JsonPrimitive(lastSampleTime(dir))
                     )
                 )
-                runCatching { metaFile.writeText(pretty.encodeToString(JsonElement.serializer(), updated)) }
+                runCatching {
+                    metaFile.writeText(
+                        pretty.encodeToString(JsonElement.serializer(), updated)
+                    )
+                }
             }
             SessionInfo(
                 id = dir.name,
                 directory = dir,
                 state = state,
                 startedAtUtc = meta["started_at_utc"]?.jsonPrimitive?.content,
-                durationMs = meta["duration_ms"]?.jsonPrimitive?.let { runCatching { it.long }.getOrNull() }
+                durationMs = meta["duration_ms"]?.jsonPrimitive
+                    ?.let { runCatching { it.long }.getOrNull() }
                     ?: lastSampleTime(dir),
                 gameTitle = meta["game_title"]?.jsonPrimitive?.content?.takeIf { it != "null" },
                 markers = meta["markers"]?.jsonPrimitive?.let { runCatching { it.int }.getOrNull() }
@@ -331,7 +370,9 @@ object DiagnosticsSession {
         val file = File(dir, DiagnosticsSchema.SAMPLES_FILE)
         return try {
             FileOutputStream(file, true).use { out ->
-                out.write((json.encodeToString(JsonElement.serializer(), line) + "\n").toByteArray())
+                out.write(
+                    (json.encodeToString(JsonElement.serializer(), line) + "\n").toByteArray()
+                )
                 out.fd.sync()
             }
             sampleCount++
@@ -366,10 +407,12 @@ object DiagnosticsSession {
         val callbacks = object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
                 synchronized(lock) {
-                    appendEvent(buildJsonObject {
-                        put("type", "trim_memory")
-                        put("level", level)
-                    })
+                    appendEvent(
+                        buildJsonObject {
+                            put("type", "trim_memory")
+                            put("level", level)
+                        }
+                    )
                 }
             }
 
@@ -387,10 +430,12 @@ object DiagnosticsSession {
             val powerManager = context.getSystemService(PowerManager::class.java)
             val listener = PowerManager.OnThermalStatusChangedListener { status ->
                 synchronized(lock) {
-                    appendEvent(buildJsonObject {
-                        put("type", "thermal_status_changed")
-                        put("status", status)
-                    })
+                    appendEvent(
+                        buildJsonObject {
+                            put("type", "thermal_status_changed")
+                            put("status", status)
+                        }
+                    )
                 }
             }
             val executor = Executor { command -> scope.launch { command.run() } }

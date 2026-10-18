@@ -314,6 +314,17 @@ class HomeSettingsFragment : Fragment() {
             )
             add(
                 HomeSetting(
+                    R.string.diagnostics_sessions,
+                    R.string.diagnostics_sessions_description,
+                    R.drawable.ic_log,
+                    {
+                        DiagnosticsSessionsDialogFragment()
+                            .show(parentFragmentManager, DiagnosticsSessionsDialogFragment.TAG)
+                    }
+                )
+            )
+            add(
+                HomeSetting(
                     R.string.open_user_folder,
                     R.string.open_user_folder_description,
                     R.drawable.ic_folder_open,
