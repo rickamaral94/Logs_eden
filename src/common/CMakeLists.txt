@@ -97,6 +97,8 @@ add_library(
     scm_rev.h
     scope_exit.h
     scratch_buffer.h
+    session_diagnostics.cpp
+    session_diagnostics.h
     settings.cpp
     settings.h
     settings_common.cpp
