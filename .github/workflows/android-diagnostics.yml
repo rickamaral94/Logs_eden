@@ -69,6 +69,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Install host shader compiler
+        run: sudo apt-get update && sudo apt-get install -y glslang-tools
+
       - name: Install NDK and CMake
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
