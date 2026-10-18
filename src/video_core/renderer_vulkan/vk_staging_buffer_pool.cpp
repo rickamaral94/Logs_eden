@@ -15,6 +15,7 @@
 #include "common/bit_util.h"
 #include "common/common_types.h"
 #include "common/literals.h"
+#include "common/session_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/vulkan_common/vulkan_device.h"
@@ -101,6 +102,11 @@ StagingBufferPool::StagingBufferPool(const Device& device_, MemoryAllocator& mem
 StagingBufferPool::~StagingBufferPool() = default;
 
 StagingBufferRef StagingBufferPool::Request(size_t size, MemoryUsage usage, bool deferred) {
+    if (usage == MemoryUsage::Upload) {
+        Common::Diagnostics::Increment(Common::Diagnostics::Counter::StagingUploadBytes, size);
+    } else if (usage == MemoryUsage::Download) {
+        Common::Diagnostics::Increment(Common::Diagnostics::Counter::StagingDownloadBytes, size);
+    }
     if (!deferred && usage == MemoryUsage::Upload && size <= region_size) {
         return GetStreamBuffer(size);
     }

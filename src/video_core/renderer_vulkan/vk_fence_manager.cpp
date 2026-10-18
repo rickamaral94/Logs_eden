@@ -3,6 +3,7 @@
 
 #include <memory>
 
+#include "common/session_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_fence_manager.h"
 #include "video_core/renderer_vulkan/vk_query_cache.h"
@@ -37,6 +38,8 @@ void InnerFence::Wait() {
     if (is_stubbed) {
         return;
     }
+    const Common::Diagnostics::ScopedWaitReason reason{
+        Common::Diagnostics::WaitReason::GuestSync};
     scheduler.Wait(wait_tick);
 }
 

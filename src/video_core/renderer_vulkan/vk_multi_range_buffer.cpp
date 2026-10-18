@@ -5,6 +5,7 @@
 #include <mutex>
 #include <utility>
 
+#include "common/session_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_multi_range_buffer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/vulkan_common/vulkan_device.h"
@@ -182,7 +183,11 @@ void MultiRangeBufferCache::RetireEntry(Scheduler& scheduler, Entry& entry) {
                 oldest = item.tick;
             }
         }
-        scheduler.Wait(oldest);
+        {
+            const Common::Diagnostics::ScopedWaitReason reason{
+                Common::Diagnostics::WaitReason::BufferRecycle};
+            scheduler.Wait(oldest);
+        }
         DrainRetired(scheduler);
     }
     retired.push_back(Retired{

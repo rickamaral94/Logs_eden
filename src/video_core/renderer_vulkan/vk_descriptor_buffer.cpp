@@ -6,6 +6,7 @@
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/logging.h"
+#include "common/session_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_descriptor_buffer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/vulkan_common/vulkan_device.h"
@@ -101,6 +102,8 @@ DescriptorBufferRing::Allocation DescriptorBufferRing::Allocate(Scheduler& sched
         return Allocation{};
     }
     const VkDeviceSize needed{Common::AlignUp(size, alignment)};
+    const Common::Diagnostics::ScopedWaitReason reason{
+        Common::Diagnostics::WaitReason::DescriptorRecycle};
     if (frame_reused) {
         frame_reused = false;
         scheduler.Wait(frame_ticks[frame_index]);

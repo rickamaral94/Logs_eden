@@ -210,6 +210,50 @@ TEST_CASE("SessionDiagnostics: events carry the game run", "[common]") {
     StopCapture();
 }
 
+TEST_CASE("SessionDiagnostics: fence waits are split by reason and thread", "[common]") {
+    FreshCapture();
+    RecordFenceWait(2ms);
+    {
+        ScopedWaitReason outer{WaitReason::SwapchainImage};
+        RecordFenceWait(20ms);
+        {
+            ScopedWaitReason inner{WaitReason::GuestSync};
+            REQUIRE(ScopedWaitReason::Current() == WaitReason::GuestSync);
+            RecordFenceWait(5ms);
+        }
+        REQUIRE(ScopedWaitReason::Current() == WaitReason::SwapchainImage);
+    }
+    REQUIRE(ScopedWaitReason::Current() == WaitReason::Unspecified);
+    std::thread worker{[] {
+        ScopedWaitReason reason{WaitReason::CacheSync};
+        RecordFenceWait(40ms);
+    }};
+    worker.join();
+
+    const json sample = json::parse(TakeSampleJson());
+    REQUIRE(sample["timers"]["fence_wait"]["count"] == 4);
+    const json reasons = sample["fence_wait_by_reason"];
+    REQUIRE(reasons["unspecified"]["count"] == 1);
+    REQUIRE(reasons["unspecified"]["distribution"]["1_4ms"] == 1);
+    REQUIRE(reasons["swapchain_image"]["total_us"] == 20000);
+    REQUIRE(reasons["swapchain_image"]["distribution"]["16_33ms"] == 1);
+    REQUIRE(reasons["guest_sync"]["distribution"]["4_8ms"] == 1);
+    REQUIRE(reasons["cache_sync"]["distribution"]["ge_33ms"] == 1);
+    REQUIRE_FALSE(reasons.contains("present_resources"));
+    u64 thread_waits = 0;
+    for (const auto& [name, entry] : sample["fence_wait_by_thread"].items()) {
+        thread_waits += entry["count"].get<u64>();
+    }
+    REQUIRE(thread_waits == 4);
+    REQUIRE(sample["fence_wait_by_thread"].size() >= 1);
+
+    // Windows reset, the session keeps the totals.
+    REQUIRE(json::parse(TakeSampleJson())["fence_wait_by_reason"].empty());
+    const json summary = json::parse(SessionSummaryJson());
+    REQUIRE(summary["fence_wait_by_reason"]["swapchain_image"]["count"] == 1);
+    StopCapture();
+}
+
 TEST_CASE("SessionDiagnostics: sections and samplers", "[common]") {
     FreshCapture();
     SetSection("test_section", R"({"value":1})");

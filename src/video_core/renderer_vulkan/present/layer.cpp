@@ -12,6 +12,7 @@
 #undef BadValue
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "video_core/framebuffer_config.h"
 #include "video_core/renderer_vulkan/present/fsr.h"
@@ -106,7 +107,11 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
 
     // Finish any pending renderpass
     scheduler.RequestOutsideRenderPassOperationContext();
-    scheduler.Wait(resource_ticks[image_index]);
+    {
+        const Common::Diagnostics::ScopedWaitReason reason{
+            Common::Diagnostics::WaitReason::PresentResources};
+        scheduler.Wait(resource_ticks[image_index]);
+    }
     SCOPE_EXIT {
         resource_ticks[image_index] = scheduler.CurrentTick();
     };
@@ -253,8 +258,12 @@ void Layer::SetPostProcessPass(const Device& device, bool is_applet) {
         return;
     }
 
-    for (const u64 tick : resource_ticks) {
-        scheduler.Wait(tick);
+    {
+        const Common::Diagnostics::ScopedWaitReason reason{
+            Common::Diagnostics::WaitReason::PresentResources};
+        for (const u64 tick : resource_ticks) {
+            scheduler.Wait(tick);
+        }
     }
 
     post_process_generation = generation;
@@ -275,6 +284,8 @@ void Layer::SetPostProcessPass(const Device& device, bool is_applet) {
 #endif
 
 void Layer::ReleaseRawImages() {
+    const Common::Diagnostics::ScopedWaitReason reason{
+        Common::Diagnostics::WaitReason::PresentResources};
     for (const u64 tick : resource_ticks) {
         scheduler.Wait(tick);
     }

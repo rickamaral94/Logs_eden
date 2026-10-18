@@ -10,6 +10,7 @@
 #include <span>
 #include <vector>
 
+#include "common/session_diagnostics.h"
 #include "video_core/buffer_cache/buffer_cache_base.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
 
@@ -170,6 +171,8 @@ public:
             return;
         }
 
+        const Common::Diagnostics::ScopedWaitReason reason{
+            Common::Diagnostics::WaitReason::BufferRecycle};
         scheduler.Finish();
 
         num_indices = num_indices_;
@@ -427,10 +430,12 @@ bool BufferCacheRuntime::IsFree(u64 tick) {
 }
 
 void BufferCacheRuntime::Wait(u64 tick) {
+    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::CacheSync};
     scheduler.Wait(tick);
 }
 
 void BufferCacheRuntime::Finish() {
+    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::CacheSync};
     scheduler.Finish();
 }
 

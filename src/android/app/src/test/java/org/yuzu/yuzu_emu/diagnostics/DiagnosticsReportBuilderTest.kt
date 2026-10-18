@@ -48,8 +48,13 @@ class DiagnosticsReportBuilderTest {
             "metric_definitions":{}}"""
         )
         File(session, DiagnosticsSchema.STATIC_END_FILE).writeText(
-            """{"native_summary":{"frames":{"guest_present_interval":{"count":10,"p99_ms":40.0}},
-              "counters":{"graphics_pipeline_cache_miss":3},"timers":{},"capture_seq":2,
+            """{"native_summary":{"frames":{"guest_present_interval":{"count":10,"p99_ms":40.0},
+                "host_present_interval":{"count":20}},
+              "counters":{"graphics_pipeline_cache_miss":3,"scheduler_submits":30,"draw_calls":600},
+              "timers":{"fence_wait":{"count":3,"total_us":9000,"max_us":5000}},"capture_seq":2,
+              "fence_wait_by_reason":{"swapchain_image":{"count":2,"total_us":8000,"max_us":5000},
+                "guest_sync":{"count":1,"total_us":1000,"max_us":1000}},
+              "fence_wait_by_thread":{"VulkanPresent":{"count":3,"total_us":9000,"max_us":5000}},
               "gpu_timing":{"available":true,"coverage_pct":98.5,"frames_complete":170,
                 "frames_partial":3,"frame_gpu":{"count":170,"p50_ms":12.5,"p99_ms":21.0}},
               "capture_start_mono_ms":1000,"capture_stop_mono_ms":7000,"capturing":false},
@@ -320,6 +325,19 @@ class DiagnosticsReportBuilderTest {
         val busy = gpu["submit_busy_union_pct_of_window"]!!.jsonObject
         assertEquals(75.0, busy["max"]!!.jsonPrimitive.content.toDouble(), 0.001)
         assertTrue(plan.summary.contains("Frame GPU time p50/p90/p99/max ms: 12.5"))
+    }
+
+    @Test
+    fun cpuWaitsAndWorkloadAreNormalizedPerFrame() {
+        val plan = build()
+        val waits = plan.report["cpu_waits"]!!.jsonObject
+        assertTrue(waits["by_reason"]!!.jsonObject.containsKey("swapchain_image"))
+        assertTrue(waits["note"]!!.jsonPrimitive.content.contains("not additive"))
+        assertFalse(waits.containsKey("available"))
+        val perFrame = plan.report["workload"]!!.jsonObject["per_host_frame"]!!.jsonObject
+        assertEquals(30.0, perFrame["draw_calls"]!!.jsonPrimitive.content.toDouble(), 0.001)
+        assertEquals(1.5, perFrame["scheduler_submits"]!!.jsonPrimitive.content.toDouble(), 0.001)
+        assertTrue(plan.summary.contains("swapchain_image: count=2 total=8000"))
     }
 
     @Test

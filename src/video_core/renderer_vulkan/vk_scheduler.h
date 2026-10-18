@@ -17,6 +17,7 @@
 #include "common/alignment.h"
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -150,6 +151,8 @@ public:
             frame_counter++;
             auto target_time = start_time + frame_interval * frame_counter;
             if (target_time >= now) {
+                Common::Diagnostics::ScopedTimer throttle{
+                    Common::Diagnostics::Timer::FramePacingThrottle};
                 constexpr auto spin_tail = std::chrono::milliseconds(1);
                 auto sleep_time = target_time - now;
                 if (sleep_time > spin_tail * 2) {

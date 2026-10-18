@@ -164,6 +164,33 @@ reason.
 - Cost per submission: one query reset, two timestamp writes, and on read one
   `vkGetQueryPoolResults` for two queries.
 
+## CPU waits, presentation and workload
+
+- `fence_wait` is split by `fence_wait_by_reason` (per window and per capture): callers declare
+  the reason with a thread-local scope, the innermost scope wins and waits without one are
+  `unspecified`. Reasons: `scheduler_finish` (a `Scheduler::Finish` without a more specific
+  reason), `guest_sync` (fence manager, guest syncpoints), `swapchain_image` (resources of the
+  next swapchain image, i.e. frames in flight, including the pacing variants), `present_resources`
+  (present layer reuse/recreation), `descriptor_recycle`, `buffer_recycle`, `cache_sync`
+  (texture/buffer cache synchronization such as downloads). Each has count, total, max, mean and
+  a distribution (`lt_1ms` … `ge_33ms`). `fence_wait_by_thread` gives the same per thread name
+  (at most 16, the rest as `other`). Scopes are inclusive: waits on different threads overlap and
+  are not summed into a critical path.
+- Presentation timers (CPU time inside the call): `swapchain_acquire_cpu`
+  (`vkAcquireNextImageKHR`), `swapchain_present_cpu` (`vkQueuePresentKHR`),
+  `present_queue_submit`, `frame_pacing_throttle` (sleep of the scheduler pacing limiter). No
+  present-timing extension is used, so nothing here is display or scanout latency.
+- Swapchain: `vulkan.swapchain.present_mode_inputs` records the vsync setting, speed limit,
+  speed mode and frame generation that decide the present mode, and the selection rule;
+  `swapchain/recreate` events record each recreation with its reason (`frame_size_changed`,
+  `present_mode_changed`, `suboptimal`, `acquire_out_of_date_or_suboptimal`) and sizes.
+- Workload counters: `scheduler_submits`, `draw_calls` (guest draws reaching the rasterizer
+  with a pipeline), `indexed_draw_calls`, `indirect_draw_calls`, `compute_dispatches`,
+  `render_passes`, `staging_upload_bytes`, `staging_download_bytes` (requested sizes). The report
+  `workload.per_host_frame` divides them by host frames.
+- Not instrumented yet: Maxwell command processing and descriptor preparation timers, scheduler
+  queue depth, flush reasons, triangle/index counts, barriers and layout transitions.
+
 ## Report schema (version 2)
 
 Field names are stable. Additive changes keep `schema_version`; renaming or removing a field, or
@@ -195,6 +222,7 @@ Top-level fields of `report.json`:
 | `android_summary` | Aggregates of Android samples (avg/min/max), GC totals, sampler cost |
 | `frame_rate` | Guest present, host present and game FPS averaged over the capture |
 | `gpu_timing` | See [GPU time](#gpu-time-vulkan-timestamps) |
+| `cpu_waits`, `workload` | See [CPU waits, presentation and workload](#cpu-waits-presentation-and-workload) |
 | `markers` | User markers with `context` built from samples within -10 s / +5 s |
 | `hitches` | Up to 10 sample windows whose longest guest frame interval exceeds 100 ms, with the timers, counters, shader queue, CPU/GPU load and native events of the same window (correlation only) |
 | `events.native` | Native events of this capture (Vulkan check failures, device loss, pipeline/shader failures, long frames, markers) |
@@ -306,3 +334,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | 1 (additive) | `system.gpu_max_clock_mhz_kgsl`, `system.gpu_min_clock_mhz_kgsl` per sample; `gpu_busy_pct_kgsl`, `gpu_clock_mhz_kgsl` and `gpu_max_clock_mhz_kgsl` statistics in `android_summary`; `gpu_clock_mhz_kgsl` in `hitches`. The Eden log is flushed before export, so the bundled log now includes its newest lines |
 | 2 | Capture scoping: `events.native` holds only this capture (schema 1 mixed earlier captures in and kept `during_capture=true` for them), new `events.native_context`/`native_scope`; `identity`, `session_end`, `identity_changes`, `log_coverage`, `log_digest`, `manifest.json`; identity fields frozen at capture start; `exit_reasons` gain `pid`, `category`, `relation`; `native_summary.capturing` is false and `duration_ms` final after stop; `logs/eden_log.txt` holds the capture's lines instead of the file tail; `serial_unit`/`serial_battery` removed |
 | 2 (additive) | `gpu_timing` (report), `native_summary.gpu_timing`, `samples[].native.gpu_timing`; `frame_gpu_max_ms` in `hitches`; `session.gpu_timestamps_enabled`; `device_lost` events carry `host_frame_id` and `game_run_id` |
+| 2 (additive) | `fence_wait_by_reason`, `fence_wait_by_thread` (samples and native summary); timers `swapchain_acquire_cpu`, `swapchain_present_cpu`, `frame_pacing_throttle`; counters `scheduler_submits`, `draw_calls`, `indexed_draw_calls`, `indirect_draw_calls`, `compute_dispatches`, `render_passes`, `staging_upload_bytes`, `staging_download_bytes`; report `cpu_waits`, `workload`; `vulkan.swapchain.present_mode_inputs`; `swapchain/recreate` events |

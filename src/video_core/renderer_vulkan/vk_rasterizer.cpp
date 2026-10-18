@@ -16,6 +16,7 @@
 #include "common/assert.h"
 #include "common/logging.h"
 #include "common/scope_exit.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/gpu_logging/gpu_logging.h"
@@ -256,6 +257,10 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     query_cache.NotifySegment(true);
     HandleTransformFeedback();
     query_cache.CounterEnable(VideoCommon::QueryType::ZPassPixelCount64, maxwell3d->regs.zpass_pixel_count_enable);
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::DrawCalls);
+    if (is_indexed) {
+        Common::Diagnostics::Increment(Common::Diagnostics::Counter::IndexedDrawCalls);
+    }
     draw_func();
 }
 
@@ -293,6 +298,7 @@ void RasterizerVulkan::Draw(bool is_indexed, u32 instance_count) {
 }
 
 void RasterizerVulkan::DrawIndirect() {
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::IndirectDrawCalls);
     const auto& params = maxwell3d->draw_manager.indirect_state;
     buffer_cache.SetDrawIndirect(&params);
     PrepareDraw(params.is_indexed, [this, &params] {
@@ -590,6 +596,7 @@ void RasterizerVulkan::DispatchCompute() {
     if (!pipeline) {
         return;
     }
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::ComputeDispatches);
     std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
     if (!pipeline->Configure(*kepler_compute, *gpu_memory, scheduler, buffer_cache,
                              texture_cache)) {

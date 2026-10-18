@@ -30,6 +30,9 @@ enum class Timer : u32 {
     ComputeShaderTranslate,  ///< Runtime guest compute shader translation + module creation.
     GraphicsPipelineCreate,  ///< Driver pipeline creation (MakePipeline), graphics.
     ComputePipelineCreate,   ///< Driver pipeline creation, compute.
+    SwapchainAcquire,        ///< Inside vkAcquireNextImageKHR.
+    SwapchainPresent,        ///< Inside vkQueuePresentKHR (the call, not display latency).
+    FramePacingThrottle,     ///< Sleeping in the scheduler frame pacing limiter.
     Count,
 };
 
@@ -42,6 +45,28 @@ enum class Counter : u32 {
     SwapchainCreated,           ///< Swapchain (re)creations.
     DiskPipelinesLoaded,        ///< Pipelines restored from the disk shader cache.
     GameFrames,                 ///< Frames rendered by the game (PerfStats::EndGameFrame).
+    SchedulerSubmits,           ///< vkQueueSubmit calls of the scheduler worker.
+    DrawCalls,                  ///< Guest draws reaching the Vulkan rasterizer (all kinds).
+    IndexedDrawCalls,           ///< Subset of DrawCalls that are indexed.
+    IndirectDrawCalls,          ///< Guest indirect draw commands (one per DrawIndirect).
+    ComputeDispatches,          ///< Guest compute dispatches.
+    RenderPasses,               ///< Render passes begun by the scheduler.
+    StagingUploadBytes,         ///< Bytes requested from the staging pool for uploads.
+    StagingDownloadBytes,       ///< Bytes requested from the staging pool for downloads.
+    Count,
+};
+
+/// Why a thread blocked in MasterSemaphore::Wait. Set by the caller with ScopedWaitReason;
+/// waits without a scope are "unspecified". Scopes nest; the innermost wins.
+enum class WaitReason : u8 {
+    Unspecified,
+    SchedulerFinish,   ///< Scheduler::Finish without a more specific reason.
+    GuestSync,         ///< Guest fence / syncpoint wait (fence manager).
+    SwapchainImage,    ///< Resources of the next swapchain image (frames in flight).
+    PresentResources,  ///< Present layer resources reused or recreated.
+    DescriptorRecycle, ///< Descriptor buffer frame reuse or exhaustion.
+    BufferRecycle,     ///< Ring/multi-range buffer reuse, quad index buffer growth.
+    CacheSync,         ///< Texture/buffer cache synchronization (downloads, readbacks).
     Count,
 };
 
@@ -143,6 +168,47 @@ void WriteCriticalMarker(std::string_view reason);
 /// Milliseconds on the monotonic clock (CLOCK_MONOTONIC on Android, same base as
 /// System.nanoTime() on the Java side).
 [[nodiscard]] s64 MonotonicMs() noexcept;
+
+/// Records one CPU wait on a GPU tick: the fence_wait timer plus the per-reason and per-thread
+/// breakdown of the calling thread.
+void RecordFenceWait(std::chrono::nanoseconds duration);
+
+/// Sets the wait reason of the calling thread for its lifetime.
+class ScopedWaitReason {
+public:
+    explicit ScopedWaitReason(WaitReason reason) noexcept;
+    ~ScopedWaitReason();
+
+    ScopedWaitReason(const ScopedWaitReason&) = delete;
+    ScopedWaitReason& operator=(const ScopedWaitReason&) = delete;
+
+    [[nodiscard]] static WaitReason Current() noexcept;
+
+private:
+    WaitReason previous;
+};
+
+/// Measures a fence wait; see RecordFenceWait.
+class ScopedFenceWait {
+public:
+    ScopedFenceWait() noexcept : active{IsCapturing()} {
+        if (active) {
+            start = std::chrono::steady_clock::now();
+        }
+    }
+    ~ScopedFenceWait() {
+        if (active) {
+            RecordFenceWait(std::chrono::steady_clock::now() - start);
+        }
+    }
+
+    ScopedFenceWait(const ScopedFenceWait&) = delete;
+    ScopedFenceWait& operator=(const ScopedFenceWait&) = delete;
+
+private:
+    bool active;
+    std::chrono::steady_clock::time_point start{};
+};
 
 class ScopedTimer {
 public:

@@ -84,7 +84,7 @@ void MasterSemaphore::Wait(u64 tick) {
             return;
         }
 
-        Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::FenceWait};
+        Common::Diagnostics::ScopedFenceWait timer;
         u64 last_tick = gpu_tick.load(std::memory_order_relaxed);
         while (gpu_tick.load(std::memory_order_acquire) < tick) {
             gpu_tick.wait(last_tick, std::memory_order_acquire);
@@ -106,7 +106,7 @@ void MasterSemaphore::Wait(u64 tick) {
     }
 
     // If none of the above is hit, fallback to a regular wait
-    Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::FenceWait};
+    Common::Diagnostics::ScopedFenceWait timer;
     while (!semaphore.Wait(tick)) {
     }
 

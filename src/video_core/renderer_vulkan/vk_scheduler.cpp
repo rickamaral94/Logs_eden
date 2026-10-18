@@ -66,6 +66,11 @@ u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
 
 void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
     // When finishing, we need to wait for the submission to have executed on the device.
+    namespace Diag = Common::Diagnostics;
+    const Diag::ScopedWaitReason reason{
+        Diag::ScopedWaitReason::Current() == Diag::WaitReason::Unspecified
+            ? Diag::WaitReason::SchedulerFinish
+            : Diag::ScopedWaitReason::Current()};
     const u64 presubmit_tick = CurrentTick();
     SubmitExecution(signal_semaphore, wait_semaphore);
     Wait(presubmit_tick);
@@ -98,6 +103,7 @@ void Scheduler::DispatchWork() {
 
 void Scheduler::BeginRenderPassImpl(const Framebuffer* framebuffer, VkRenderPass renderpass,
                                     const VkClearValue* clear_values, u32 clear_value_count) {
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::RenderPasses);
     const VkFramebuffer framebuffer_handle = framebuffer->Handle();
     const VkExtent2D render_area = framebuffer->RenderArea();
     state.renderpass = renderpass;
@@ -372,6 +378,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                                                  wait_semaphore, signal_value);
         }();
         if (submit_result == VK_SUCCESS) {
+            Common::Diagnostics::Increment(Common::Diagnostics::Counter::SchedulerSubmits);
             gpu_timestamps->Poll(master_semaphore->KnownGpuTick());
         }
         switch (const VkResult result = submit_result) {

@@ -184,6 +184,8 @@ class DiagnosticsReportBuilder(
             put("android_summary", androidSummary(captureSamples))
             put("frame_rate", frameRate(captureSamples))
             put("gpu_timing", gpuTiming(nativeSummary.asObject(), captureSamples))
+            put("cpu_waits", cpuWaits(nativeSummary.asObject()))
+            put("workload", workload(nativeSummary.asObject()))
             put("hitches", hitches(captureSamples))
             put(
                 "markers",
@@ -705,6 +707,82 @@ class DiagnosticsReportBuilder(
         }
     }
 
+    private fun cpuWaits(summary: JsonObject?): JsonObject {
+        val byReason = summary?.get("fence_wait_by_reason")?.asObject()
+            ?: return unavailable("not recorded by this build")
+        val timers = summary["timers"]?.asObject()
+        return buildJsonObject {
+            put(
+                "note",
+                "CPU wall time threads spent blocked on GPU ticks, by caller-declared reason " +
+                    "and by thread. Waits on different threads overlap and are not additive; " +
+                    "a wait is not proof that the GPU was busy for that long"
+            )
+            put("fence_wait_total", timers?.get("fence_wait") ?: JsonNull)
+            put("by_reason", byReason)
+            put("by_thread", summary["fence_wait_by_thread"] ?: JsonNull)
+            put(
+                "presentation",
+                buildJsonObject {
+                    listOf(
+                        "swapchain_acquire_cpu",
+                        "swapchain_present_cpu",
+                        "present_queue_submit",
+                        "frame_pacing_throttle"
+                    ).forEach { put(it, timers?.get(it) ?: JsonNull) }
+                    put(
+                        "note",
+                        "time inside the calls on the calling CPU thread; not scanout or " +
+                            "display latency (no present timing extension is used)"
+                    )
+                }
+            )
+        }
+    }
+
+    /** Work submitted per host frame. Counts, not costs. */
+    private fun workload(summary: JsonObject?): JsonObject {
+        val counters = summary?.get("counters")?.asObject()
+            ?: return unavailable("no native summary")
+        val hostFrames = summary["frames"]?.asObject()?.get("host_present_interval")?.asObject()
+            .num("count")?.takeIf { it > 0 }
+        val names = listOf(
+            "scheduler_submits",
+            "draw_calls",
+            "indexed_draw_calls",
+            "indirect_draw_calls",
+            "compute_dispatches",
+            "render_passes",
+            "staging_upload_bytes",
+            "staging_download_bytes"
+        )
+        if (names.none { counters.containsKey(it) }) {
+            return unavailable("not recorded by this build")
+        }
+        return buildJsonObject {
+            put("host_frames", hostFrames)
+            put("totals", JsonObject(names.associateWith { counters[it] ?: JsonNull }))
+            put(
+                "per_host_frame",
+                JsonObject(
+                    names.associateWith { name ->
+                        val total = counters.num(name)
+                        if (total != null && hostFrames != null) {
+                            JsonPrimitive(total / hostFrames)
+                        } else {
+                            JsonNull
+                        }
+                    }
+                )
+            )
+            put(
+                "note",
+                "draws count guest draws that reached the rasterizer with a pipeline; staging " +
+                    "bytes are requested sizes, not bytes copied by the GPU"
+            )
+        }
+    }
+
     private fun frameRate(samples: List<JsonObject>): JsonObject {
         var windowMs = 0.0
         var guestFrames = 0.0
@@ -1017,6 +1095,47 @@ class DiagnosticsReportBuilder(
                 )
             } else {
                 appendLine("Not available: ${gpu.str("reason")}")
+            }
+            appendLine()
+            val waits = report["cpu_waits"]?.asObject()
+            appendLine("== CPU waits on the GPU (wall clock, per thread, overlapping) ==")
+            (waits?.get("by_reason") as? JsonObject)?.entries
+                ?.sortedByDescending { it.value.asObject().num("total_us") ?: 0.0 }
+                ?.forEach { (reason, value) ->
+                    val v = value.asObject()
+                    appendLine(
+                        "  $reason: count=${v.str("count")} total=${v.num0("total_us")} µs " +
+                            "max=${v.str("max_us")} µs"
+                    )
+                } ?: appendLine("  not recorded by this build")
+            (waits?.get("by_thread") as? JsonObject)?.let { threads ->
+                appendLine(
+                    "  threads: " + threads.entries
+                        .sortedByDescending { it.value.asObject().num("total_us") ?: 0.0 }
+                        .joinToString(", ") { (name, value) ->
+                            "$name ${value.asObject().num0("total_us")} µs"
+                        }
+                )
+            }
+            val presentation = waits?.get("presentation")?.asObject()
+            if (presentation != null) {
+                appendLine(
+                    "  acquire/present/throttle max µs: " +
+                        "${presentation["swapchain_acquire_cpu"]?.asObject().str("max_us")} / " +
+                        "${presentation["swapchain_present_cpu"]?.asObject().str("max_us")} / " +
+                        presentation["frame_pacing_throttle"]?.asObject().str("max_us")
+                )
+            }
+            val work = report["workload"]?.asObject()?.get("per_host_frame")?.asObject()
+            if (work != null) {
+                val uploadKib = work.num("staging_upload_bytes")
+                    ?.let { String.format(Locale.ROOT, "%.1f", it / 1024.0) } ?: "n/a"
+                appendLine(
+                    "Per host frame: submits ${work.num1("scheduler_submits")}, " +
+                        "draws ${work.num1("draw_calls")}, " +
+                        "dispatches ${work.num1("compute_dispatches")}, " +
+                        "render passes ${work.num1("render_passes")}, upload KiB $uploadKib"
+                )
             }
             appendLine()
             appendLine("== Shaders / pipelines ==")

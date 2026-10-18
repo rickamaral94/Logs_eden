@@ -43,6 +43,11 @@ public:
     void Present(VkSemaphore render_semaphore);
 
     /// Returns true when the swapchain needs to be recreated.
+    /// The configured vsync mode or speed state now maps to a different present mode.
+    bool PresentModeChanged() const {
+        return NeedsPresentModeUpdate();
+    }
+
     bool NeedsRecreation() const {
         return IsSubOptimal() || NeedsPresentModeUpdate();
     }

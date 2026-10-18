@@ -162,9 +162,12 @@ void Swapchain::Create(
 }
 
 bool Swapchain::AcquireNextImage() {
-    const VkResult result = device.GetLogical().AcquireNextImageKHR(
-        *swapchain, (std::numeric_limits<u64>::max)(), *present_semaphores[frame_index],
-        VK_NULL_HANDLE, &image_index);
+    const VkResult result = [&] {
+        Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::SwapchainAcquire};
+        return device.GetLogical().AcquireNextImageKHR(
+            *swapchain, (std::numeric_limits<u64>::max)(), *present_semaphores[frame_index],
+            VK_NULL_HANDLE, &image_index);
+    }();
     switch (result) {
     case VK_SUCCESS:
         break;
@@ -202,6 +205,8 @@ bool Swapchain::AcquireNextImage() {
     }
     };
 
+    const Common::Diagnostics::ScopedWaitReason wait_reason{
+        Common::Diagnostics::WaitReason::SwapchainImage};
 #ifdef __ANDROID__
     if (android_get_device_api_level() >= 30) {
         scheduler.Wait(resource_ticks[image_index]);
@@ -230,7 +235,11 @@ void Swapchain::Present(VkSemaphore render_semaphore) {
         .pResults = nullptr,
     };
     std::scoped_lock lock{scheduler.submit_mutex};
-    switch (const VkResult result = present_queue.Present(present_info)) {
+    const VkResult present_result = [&] {
+        Common::Diagnostics::ScopedTimer timer{Common::Diagnostics::Timer::SwapchainPresent};
+        return present_queue.Present(present_info);
+    }();
+    switch (const VkResult result = present_result) {
     case VK_SUCCESS:
         break;
     case VK_SUBOPTIMAL_KHR:
@@ -357,6 +366,19 @@ void Swapchain::CreateSwapchain(const VkSurfaceCapabilitiesKHR& capabilities) {
             {"color_space", string_VkColorSpaceKHR(surface_format.colorSpace)},
             {"present_mode", string_VkPresentModeKHR(present_mode)},
             {"available_present_modes", std::move(available_modes)},
+            {"present_mode_inputs",
+             {
+                 {"vsync_mode_setting",
+                  std::string{Settings::CanonicalizeEnum(Settings::values.vsync_mode.GetValue())}},
+                 {"use_speed_limit", Settings::values.use_speed_limit.GetValue()},
+                 {"speed_mode",
+                  std::string{
+                      Settings::CanonicalizeEnum(Settings::values.current_speed_mode.GetValue())}},
+                 {"frame_gen", Settings::values.frame_gen.GetValue()},
+                 {"rule", "unlocked speed or turbo prefers mailbox, then immediate; an "
+                          "unsupported mode falls back to mailbox, then FIFO; frame "
+                          "generation forces FIFO or FIFO relaxed"},
+             }},
             {"width", extent.width},
             {"height", extent.height},
             {"requested_image_count", requested_image_count},

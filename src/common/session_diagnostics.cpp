@@ -10,6 +10,10 @@
 #include <map>
 #include <mutex>
 
+#if defined(__linux__) || defined(__ANDROID__)
+#include <pthread.h>
+#endif
+
 #include <nlohmann/json.hpp>
 
 #include "common/diagnostics_gpu_timing.h"
@@ -83,6 +87,24 @@ struct TimerStat {
     }
 };
 
+struct WaitStat {
+    TimerStat timer;
+    std::array<std::atomic<u64>, 6> buckets{};
+
+    void Reset() noexcept {
+        timer.Reset();
+        for (auto& bucket : buckets) {
+            bucket.store(0, std::memory_order_relaxed);
+        }
+    }
+};
+
+struct ThreadWait {
+    u64 count{};
+    u64 total_ns{};
+    u64 max_ns{};
+};
+
 struct FrameWindow {
     std::vector<u32> intervals_us;
     u64 dropped{};
@@ -114,6 +136,12 @@ struct State {
     std::array<TimerStat, TimerCount> session_timers{};
     std::array<std::atomic<u64>, CounterCount> window_counters{};
     std::array<std::atomic<u64>, CounterCount> session_counters{};
+
+    std::array<WaitStat, static_cast<size_t>(WaitReason::Count)> window_waits{};
+    std::array<WaitStat, static_cast<size_t>(WaitReason::Count)> session_waits{};
+    std::mutex wait_threads_mutex;
+    std::map<std::string, ThreadWait, std::less<>> window_wait_threads;
+    std::map<std::string, ThreadWait, std::less<>> session_wait_threads;
 
     std::mutex frames_mutex;
     std::array<FrameWindow, SeriesCount> frame_windows{};
@@ -162,6 +190,9 @@ constexpr std::array<std::string_view, TimerCount> TIMER_NAMES{
     "compute_shader_translate",
     "graphics_pipeline_create",
     "compute_pipeline_create",
+    "swapchain_acquire_cpu",
+    "swapchain_present_cpu",
+    "frame_pacing_throttle",
 };
 
 constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
@@ -169,7 +200,32 @@ constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
     "draw_skipped_pipeline_pending", "pipeline_create_failed",
     "shader_translate_failed",       "swapchain_created",
     "disk_pipelines_loaded",         "game_frames",
+    "scheduler_submits",             "draw_calls",
+    "indexed_draw_calls",            "indirect_draw_calls",
+    "compute_dispatches",            "render_passes",
+    "staging_upload_bytes",          "staging_download_bytes",
 };
+
+constexpr size_t WaitReasonCount = static_cast<size_t>(WaitReason::Count);
+
+constexpr std::array<std::string_view, WaitReasonCount> WAIT_REASON_NAMES{
+    "unspecified",        "scheduler_finish", "guest_sync",   "swapchain_image",
+    "present_resources",  "descriptor_recycle", "buffer_recycle", "cache_sync",
+};
+
+// Upper bounds in microseconds of the fence wait distribution buckets.
+constexpr std::array<std::pair<std::string_view, u64>, 6> WAIT_BUCKETS{{
+    {"lt_1ms", 1'000},
+    {"1_4ms", 4'000},
+    {"4_8ms", 8'000},
+    {"8_16ms", 16'000},
+    {"16_33ms", 33'334},
+    {"ge_33ms", UINT64_MAX},
+}};
+
+constexpr size_t MaxWaitThreads = 16;
+
+thread_local WaitReason t_wait_reason = WaitReason::Unspecified;
 
 constexpr std::array<std::string_view, SeriesCount> SERIES_NAMES{
     "guest_present_interval",
@@ -285,6 +341,51 @@ json SessionFrameJson(const FrameSession& session) {
     return out;
 }
 
+const std::string& CurrentThreadName() {
+    thread_local const std::string name = [] {
+#if defined(__linux__) || defined(__ANDROID__)
+        std::array<char, 32> buffer{};
+        if (pthread_getname_np(pthread_self(), buffer.data(), buffer.size()) == 0 &&
+            buffer[0] != '\0') {
+            return std::string{buffer.data()};
+        }
+#endif
+        return std::string{"unnamed"};
+    }();
+    return name;
+}
+
+json WaitReasonsJson(std::array<WaitStat, WaitReasonCount>& waits, bool reset) {
+    json out = json::object();
+    for (size_t i = 0; i < WaitReasonCount; ++i) {
+        json entry = waits[i].timer.TakeJson(reset);
+        if (entry["count"] == 0) {
+            continue;
+        }
+        json buckets = json::object();
+        for (size_t b = 0; b < WAIT_BUCKETS.size(); ++b) {
+            buckets[std::string{WAIT_BUCKETS[b].first}] =
+                reset ? waits[i].buckets[b].exchange(0, std::memory_order_relaxed)
+                      : waits[i].buckets[b].load(std::memory_order_relaxed);
+        }
+        entry["distribution"] = std::move(buckets);
+        out[std::string{WAIT_REASON_NAMES[i]}] = std::move(entry);
+    }
+    return out;
+}
+
+json WaitThreadsJson(const std::map<std::string, ThreadWait, std::less<>>& threads) {
+    json out = json::object();
+    for (const auto& [name, wait] : threads) {
+        out[name] = json{
+            {"count", wait.count},
+            {"total_us", wait.total_ns / 1000},
+            {"max_us", wait.max_ns / 1000},
+        };
+    }
+    return out;
+}
+
 json EventJson(const Event& event) {
     json fields = json::object();
     for (const auto& [key, value] : event.fields) {
@@ -349,6 +450,11 @@ json SummaryObject(State& state) {
             frames[std::string{SERIES_NAMES[i]}] = SessionFrameJson(state.frame_sessions[i]);
         }
     }
+    json wait_threads;
+    {
+        std::scoped_lock lock{state.wait_threads_mutex};
+        wait_threads = WaitThreadsJson(state.session_wait_threads);
+    }
     s64 start_ms;
     s64 stop_ms;
     u64 samples;
@@ -382,6 +488,8 @@ json SummaryObject(State& state) {
         {"counters", std::move(counters)},
         {"frames", std::move(frames)},
         {"gpu_timing", ParseOrString(GpuTiming::Global().SessionJson())},
+        {"fence_wait_by_reason", WaitReasonsJson(state.session_waits, false)},
+        {"fence_wait_by_thread", std::move(wait_threads)},
     };
 }
 
@@ -399,6 +507,17 @@ void ResetCaptureData(State& state) {
     }
     for (auto& counter : state.session_counters) {
         counter.store(0, std::memory_order_relaxed);
+    }
+    for (auto& wait : state.window_waits) {
+        wait.Reset();
+    }
+    for (auto& wait : state.session_waits) {
+        wait.Reset();
+    }
+    {
+        std::scoped_lock wait_lock{state.wait_threads_mutex};
+        state.window_wait_threads.clear();
+        state.session_wait_threads.clear();
     }
     std::scoped_lock lock{state.frames_mutex};
     for (auto& window : state.frame_windows) {
@@ -554,6 +673,49 @@ void Increment(Counter counter, u64 amount) noexcept {
                                                                    std::memory_order_relaxed);
 }
 
+void RecordFenceWait(std::chrono::nanoseconds duration) {
+    if (!IsCapturing()) {
+        return;
+    }
+    AddTiming(Timer::FenceWait, duration);
+    auto& state = GetState();
+    const u64 ns = duration.count() > 0 ? static_cast<u64>(duration.count()) : 0;
+    const auto reason = static_cast<size_t>(t_wait_reason);
+    size_t bucket = 0;
+    while (bucket + 1 < WAIT_BUCKETS.size() && ns / 1000 >= WAIT_BUCKETS[bucket].second) {
+        ++bucket;
+    }
+    for (auto* waits : {&state.window_waits, &state.session_waits}) {
+        (*waits)[reason].timer.Add(ns);
+        (*waits)[reason].buckets[bucket].fetch_add(1, std::memory_order_relaxed);
+    }
+    const std::string& name = CurrentThreadName();
+    std::scoped_lock lock{state.wait_threads_mutex};
+    for (auto* threads : {&state.window_wait_threads, &state.session_wait_threads}) {
+        auto it = threads->find(name);
+        if (it == threads->end()) {
+            // Bounded: threads beyond the limit are folded into "other".
+            const bool full = threads->size() >= MaxWaitThreads;
+            it = threads->try_emplace(full ? std::string{"other"} : name).first;
+        }
+        ++it->second.count;
+        it->second.total_ns += ns;
+        it->second.max_ns = (std::max)(it->second.max_ns, ns);
+    }
+}
+
+ScopedWaitReason::ScopedWaitReason(WaitReason reason) noexcept : previous{t_wait_reason} {
+    t_wait_reason = reason;
+}
+
+ScopedWaitReason::~ScopedWaitReason() {
+    t_wait_reason = previous;
+}
+
+WaitReason ScopedWaitReason::Current() noexcept {
+    return t_wait_reason;
+}
+
 void RecordFrameInterval(FrameSeries series, std::chrono::nanoseconds interval) {
     if (!IsCapturing()) {
         return;
@@ -672,6 +834,12 @@ std::string TakeSampleJson() {
             state.window_counters[i].exchange(0, std::memory_order_relaxed);
     }
     out["counters"] = std::move(counters);
+    out["fence_wait_by_reason"] = WaitReasonsJson(state.window_waits, true);
+    {
+        std::scoped_lock lock{state.wait_threads_mutex};
+        out["fence_wait_by_thread"] = WaitThreadsJson(state.window_wait_threads);
+        state.window_wait_threads.clear();
+    }
 
     std::array<FrameWindow, SeriesCount> windows;
     {

@@ -4,6 +4,8 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <fmt/format.h>
+
 #include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "common/thread.h"
@@ -431,11 +433,23 @@ void PresentManager::CopyToSwapchainImpl(Frame* frame) {
     const bool is_suboptimal = swapchain.NeedsRecreation();
     const bool size_changed =
         swapchain.GetWidth() != frame->width || swapchain.GetHeight() != frame->height;
+    namespace Diag = Common::Diagnostics;
+    const auto record_recreation = [&](std::string reason) {
+        Diag::RecordEvent(Diag::Severity::Info, "swapchain", "recreate",
+                          {{"reason", std::move(reason)},
+                           {"from", fmt::format("{}x{}", swapchain.GetWidth(),
+                                                swapchain.GetHeight())},
+                           {"to", fmt::format("{}x{}", frame->width, frame->height)}});
+    };
     if (is_suboptimal || size_changed) {
+        record_recreation(size_changed               ? "frame_size_changed"
+                          : swapchain.PresentModeChanged() ? "present_mode_changed"
+                                                           : "suboptimal");
         RecreateSwapchain(frame);
     }
 
     while (swapchain.AcquireNextImage()) {
+        record_recreation("acquire_out_of_date_or_suboptimal");
         RecreateSwapchain(frame);
     }
 

@@ -16,6 +16,7 @@
 #include <bit>
 #include <numeric>
 #include "common/bit_util.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 
 #include "video_core/renderer_vulkan/vk_texture_cache.h"
@@ -971,6 +972,7 @@ TextureCacheRuntime::TextureCacheRuntime(const Device& device_, Scheduler& sched
 }
 
 void TextureCacheRuntime::Finish() {
+    const Common::Diagnostics::ScopedWaitReason reason{Common::Diagnostics::WaitReason::CacheSync};
     scheduler.Finish();
 }
 
