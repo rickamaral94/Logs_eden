@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Builds the Android app and runs the diagnostics tests on GitHub-hosted runners.
+name: Android diagnostics build
+
+on:
+  push:
+    branches: [ccr-5c49e754-6jjcvv]
+    paths:
+      - "src/**"
+      - "CMakeLists.txt"
+      - "CMakeModules/**"
+      - "cpmfile.json"
+      - ".ci/android/**"
+      - ".github/workflows/android-diagnostics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-core-tests:
+    name: Native diagnostics core tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y catch2 nlohmann-json3-dev
+
+      - name: Build and run (ASan + UBSan)
+        working-directory: src
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -fsanitize=address,undefined -I. \
+            common/session_diagnostics.cpp tests/common/session_diagnostics.cpp \
+            -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_asan"
+          "$RUNNER_TEMP/sd_asan"
+
+      - name: Build and run (TSan)
+        working-directory: src
+        run: |
+          g++ -std=c++20 -O1 -fsanitize=thread -I. \
+            common/session_diagnostics.cpp tests/common/session_diagnostics.cpp \
+            -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_tsan"
+          "$RUNNER_TEMP/sd_tsan"
+
+  android:
+    name: Android APK (mainline, RelWithDebInfo)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules /opt/ghc /usr/local/.ghcup \
+            /usr/share/swift /usr/local/share/powershell /usr/local/share/chromium
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install NDK and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;28.2.13676358" "cmake;3.31.6" "platforms;android-36"
+
+      - name: Cache CPM sources and Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/cpm
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-${{ hashFiles('cpmfile.json', 'src/android/**/*.gradle.kts', 'src/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: android-
+
+      - name: Build APK
+        run: sh .ci/android/build.sh -t standard -b RelWithDebInfo
+
+      - name: Run diagnostics unit tests
+        working-directory: src/android
+        run: ./gradlew :app:testMainlineRelWithDebInfoUnitTest --tests 'org.yuzu.yuzu_emu.diagnostics.*'
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-android-diagnostics-${{ github.sha }}
+          path: artifacts/*.apk
+          if-no-files-found: error
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-${{ github.sha }}
+          path: src/android/app/build/test-results/
+          if-no-files-found: ignore
