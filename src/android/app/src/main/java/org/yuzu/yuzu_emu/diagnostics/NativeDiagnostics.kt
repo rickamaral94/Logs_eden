@@ -9,6 +9,9 @@ object NativeDiagnostics {
     external fun stopCapture()
     external fun isCapturing(): Boolean
 
+    /** Sequence of the current or last native capture in this process; events carry it. */
+    external fun captureSequence(): Long
+
     /** Metrics accumulated since the previous call; resets the native window. */
     external fun takeSample(): String
 

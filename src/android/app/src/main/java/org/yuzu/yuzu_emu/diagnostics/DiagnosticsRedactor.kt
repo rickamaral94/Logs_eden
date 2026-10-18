@@ -74,9 +74,11 @@ class DiagnosticsRedactor(knownDirectories: Map<String, String> = emptyMap()) {
             Regex("(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b") to "<email>"
         )
 
-        // Settings printed by Settings::LogSettings that can hold a user-chosen name or URL.
+        // Settings printed by Settings::LogSettings that can hold a user-chosen name, URL, token
+        // or console identifier.
         private val SENSITIVE_SETTING_PATTERN = Regex(
-            "((?:eden_username|device_name|web_api_url)\\s*[:=]\\s*)[^\\r\\n]+"
+            "((?:eden_username|eden_token|device_name|web_api_url|serial_unit|serial_battery)" +
+                "\\s*[:=]\\s*)[^\\r\\n]+"
         )
 
         private val NETWORK_PATTERNS = listOf(

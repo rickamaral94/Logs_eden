@@ -71,6 +71,8 @@ object DiagnosticsExporter {
         return ExportInputs(
             sessionDir = session?.directory,
             edenLog = File(logDir, "eden_log.txt").takeIf { it.isFile },
+            previousEdenLog = File(logDir, "eden_log.txt.old.txt").takeIf { it.isFile },
+            currentProcess = ProcessIdentity.current(context),
             gpuLog = File(logDir, "eden_gpu.log").takeIf { it.isFile },
             gpuCrashDumps = File(logDir, "gpu_crashes").listFiles()
                 ?.sortedBy { it.lastModified() }.orEmpty(),
@@ -118,6 +120,7 @@ object DiagnosticsExporter {
                 add(
                     buildJsonObject {
                         put("timestamp_ms", info.timestamp)
+                        put("pid", info.pid)
                         put("reason", exitReasonName(info.reason))
                         put("status", info.status)
                         put("importance", info.importance)

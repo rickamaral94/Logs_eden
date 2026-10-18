@@ -38,7 +38,10 @@ class ExportInputs(
     val gpuCrashDumps: List<File>,
     val exitReasons: JsonElement,
     val snapshotStatic: JsonObject? = null,
-    val generatedAtUtc: String
+    val generatedAtUtc: String,
+    /** eden_log.txt.old.txt, the log of the previous process lifetime. */
+    val previousEdenLog: File? = null,
+    val currentProcess: JsonObject? = null
 )
 
 /**
@@ -64,11 +67,73 @@ class DiagnosticsReportBuilder(
             f.name.startsWith(DiagnosticsSchema.CRITICAL_PREFIX) && f.name.endsWith(".json")
         }?.sortedBy { it.name }.orEmpty()
 
-        val native = (staticEnd?.get("native") ?: staticStart?.get("native"))?.asObject()
+        val nativeStart = staticStart?.get("native")?.asObject()
+        val nativeEnd = staticEnd?.get("native")?.asObject()
+        // Identity (build, game, settings, backend) is frozen at capture start; runtime state
+        // such as the swapchain or shader cache is taken from the end of the capture.
+        val identity = nativeStart ?: nativeEnd
+        val native = nativeEnd ?: nativeStart
         val sections = native?.get("sections")?.asObject()
+        val criticalDocs = criticalFiles.mapNotNull { readJson(it)?.asObject() }
         val nativeSummary = staticEnd?.get("native_summary")
-            ?: criticalFiles.lastOrNull()?.let { readJson(it)?.asObject()?.get("summary") }
+            ?: criticalDocs.lastOrNull()?.get("summary")
             ?: unavailable("capture did not finish; summary reconstructed from samples only")
+
+        val captureId = meta?.str("capture_id")?.takeIf { it != "?" }
+            ?: meta?.str("session_id")?.takeIf { it != "?" }
+        val captureSeq = meta.num("native_capture_seq")?.toLong()
+            ?: nativeSummary.asObject().num("capture_seq")?.toLong()
+        val startMono = nativeSummary.asObject().num("capture_start_mono_ms")?.toLong()
+        val stopMono = nativeSummary.asObject().num("capture_stop_mono_ms")?.toLong()
+            ?: meta.num("ended_mono_ms")?.toLong()
+        val ringEvents = (
+            (native?.get("events") as? JsonArray).orEmpty() +
+                criticalDocs.flatMap { (it["events"] as? JsonArray).orEmpty() }
+            )
+            .mapNotNull { it.asObject() }
+            .distinctBy { it.str("seq") + "/" + it.str("mono_ms") }
+        val scoped = if (meta != null) {
+            SessionIntegrity.scopeNativeEvents(ringEvents, captureSeq, startMono, stopMono)
+        } else {
+            SessionIntegrity.ScopedEvents(emptyList(), ringEvents)
+        }
+        fun sampleEventInCapture(event: JsonObject): Boolean =
+            SessionIntegrity.scopeNativeEvents(listOf(event), captureSeq, startMono, stopMono)
+                .capture.isNotEmpty()
+        val captureSamples = samples.map { sample ->
+            val n = sample["native"]?.asObject() ?: return@map sample
+            val sampleEvents = n["events"] as? JsonArray ?: return@map sample
+            val kept = sampleEvents.filter { e ->
+                e.asObject()?.let(::sampleEventInCapture) ?: false
+            }
+            if (kept.size == sampleEvents.size) {
+                sample
+            } else {
+                JsonObject(sample + ("native" to JsonObject(n + ("events" to JsonArray(kept)))))
+            }
+        }
+
+        val linkedExits = SessionIntegrity.linkExitReasons(
+            inputs.exitReasons,
+            meta?.get("process")?.asObject().num("pid")?.toLong(),
+            meta.num("started_wall_ms")?.toLong()
+        )
+        val sessionEnd = SessionIntegrity.endClassification(
+            meta,
+            criticalDocs.map { it.str("reason") },
+            linkedExits
+        )
+        val logSegment = if (options.includeEdenLog) {
+            LogSegmentExtractor.extract(
+                listOfNotNull(
+                    inputs.edenLog?.let { LogSource("current_process_log", it) },
+                    inputs.previousEdenLog?.let { LogSource("previous_process_log", it) }
+                ),
+                if (meta != null) captureId else null
+            )
+        } else {
+            LogSegment(null, unavailable("excluded by user"), unavailable("excluded by user"))
+        }
 
         val markers = events.filter { it.str("type") == "user_marker" }
         val androidEvents = events.filter { it.str("type") != "user_marker" }
@@ -79,19 +144,30 @@ class DiagnosticsReportBuilder(
             put("generated_at_utc", inputs.generatedAtUtc)
             put("generator", "eden-android-diagnostics")
             put("session", meta ?: unavailable("no capture; snapshot report"))
+            put(
+                "identity",
+                identitySection(meta, captureId, captureSeq, startMono, stopMono, inputs)
+            )
+            put("session_end", sessionEnd)
+            put(
+                "identity_changes",
+                SessionIntegrity.identityChanges(nativeStart, nativeEnd)
+            )
             put("app", staticStart?.get("app") ?: JsonNull)
             put("device", deviceSection(staticStart?.get("device")))
             put("graphics_driver", staticStart?.get("graphics_driver") ?: JsonNull)
-            put("game", gameSection(staticStart?.get("game"), native?.get("game")))
-            put("build", native?.get("build") ?: JsonNull)
-            put("cpu_backend", native?.get("cpu_backend") ?: JsonNull)
-            put("settings", native?.get("settings") ?: JsonNull)
+            put("game", gameSection(staticStart?.get("game"), identity?.get("game")))
+            put("build", identity?.get("build") ?: JsonNull)
+            put("cpu_backend", identity?.get("cpu_backend") ?: JsonNull)
+            put("settings", filterSettings(identity?.get("settings")))
             put(
                 "vulkan",
                 buildJsonObject {
                     put(
                         "device",
-                        sections?.get("vulkan_device") ?: unavailable("renderer not initialized")
+                        nativeStart?.get("sections")?.asObject()?.get("vulkan_device")
+                            ?: sections?.get("vulkan_device")
+                            ?: unavailable("renderer not initialized")
                     )
                     put(
                         "swapchain",
@@ -105,22 +181,51 @@ class DiagnosticsReportBuilder(
                 }
             )
             put("native_summary", nativeSummary)
-            put("android_summary", androidSummary(samples))
-            put("frame_rate", frameRate(samples))
-            put("hitches", hitches(samples))
+            put("android_summary", androidSummary(captureSamples))
+            put("frame_rate", frameRate(captureSamples))
+            put("hitches", hitches(captureSamples))
             put(
                 "markers",
-                buildJsonArray { markers.forEach { add(markerWithContext(it, samples)) } }
+                buildJsonArray { markers.forEach { add(markerWithContext(it, captureSamples)) } }
             )
             put(
                 "events",
                 buildJsonObject {
-                    put("native", native?.get("events") ?: JsonArray(emptyList()))
+                    put("native", JsonArray(scoped.capture))
+                    put("native_context", JsonArray(scoped.context))
+                    put(
+                        "native_scope",
+                        buildJsonObject {
+                            put("capture_seq", captureSeq)
+                            put("capture_start_mono_ms", startMono)
+                            put("capture_stop_mono_ms", stopMono)
+                            put(
+                                "note",
+                                "native = recorded during this capture; native_context = " +
+                                    "earlier captures, renderer init or time outside the capture"
+                            )
+                            put(
+                                "ring_capacity",
+                                nativeSummary.asObject()?.get("event_ring_capacity") ?: JsonNull
+                            )
+                            put(
+                                "dropped_total",
+                                nativeSummary.asObject()?.get("events_dropped") ?: JsonNull
+                            )
+                            put(
+                                "dropped_this_capture",
+                                nativeSummary.asObject()?.get("capture_events_dropped")
+                                    ?: JsonNull
+                            )
+                        }
+                    )
                     put("android", JsonArray(androidEvents))
                     put("critical_markers", criticalFiles.size)
                 }
             )
-            put("exit_reasons", inputs.exitReasons)
+            put("exit_reasons", linkedExits)
+            put("log_coverage", logSegment.coverage)
+            put("log_digest", logSegment.digest)
             put("availability", availability(samples))
             put("metric_definitions", staticStart?.get("metric_definitions") ?: JsonNull)
         }
@@ -151,14 +256,12 @@ class DiagnosticsReportBuilder(
                 redactor.redactPaths(it.readText()).toByteArray()
             )
         }
-        if (options.includeEdenLog) {
-            inputs.edenLog?.let { tail(it, MAX_LOG_BYTES) }?.let {
-                entries += BundleEntry(
-                    "logs/eden_log.txt",
-                    "Eden log (last ${MAX_LOG_BYTES / 1024 / 1024} MiB)",
-                    redactor.redactText(it).toByteArray()
-                )
-            }
+        logSegment.text?.let {
+            entries += BundleEntry(
+                "logs/eden_log.txt",
+                "Eden log lines of this capture with labelled context; see log_coverage",
+                redactor.redactText(it).toByteArray()
+            )
         }
         if (options.includeGpuLog) {
             inputs.gpuLog?.let { tail(it, MAX_LOG_BYTES) }?.let {
@@ -184,6 +287,13 @@ class DiagnosticsReportBuilder(
         val contents = buildJsonArray {
             add(fileJson(DiagnosticsSchema.REPORT_FILE, "Structured report (this file)", null))
             add(fileJson(DiagnosticsSchema.SUMMARY_FILE, "Human readable summary", null))
+            add(
+                fileJson(
+                    DiagnosticsSchema.MANIFEST_FILE,
+                    "Sizes, SHA-256 and coverage of every file",
+                    null
+                )
+            )
             entries.forEach { add(fileJson(it.name, it.description, it.content.size.toLong())) }
         }
         val finalReport = JsonObject(
@@ -192,16 +302,157 @@ class DiagnosticsReportBuilder(
                 "privacy" to privacySection()
             )
         )
+        val reportBytes = pretty.encodeToString(JsonElement.serializer(), finalReport).toByteArray()
+        val summaryBytes = summary.toByteArray()
+        val readmeBytes = readme().toByteArray()
+        val manifest = manifest(
+            listOf(
+                DiagnosticsSchema.REPORT_FILE to reportBytes,
+                DiagnosticsSchema.SUMMARY_FILE to summaryBytes,
+                DiagnosticsSchema.README_FILE to readmeBytes
+            ) + entries.map { it.name to it.content },
+            finalReport,
+            captureSamples,
+            meta
+        )
         val all = listOf(
+            BundleEntry(DiagnosticsSchema.REPORT_FILE, "", reportBytes),
+            BundleEntry(DiagnosticsSchema.SUMMARY_FILE, "", summaryBytes),
+            BundleEntry(DiagnosticsSchema.README_FILE, "", readmeBytes),
             BundleEntry(
-                DiagnosticsSchema.REPORT_FILE,
+                DiagnosticsSchema.MANIFEST_FILE,
                 "",
-                pretty.encodeToString(JsonElement.serializer(), finalReport).toByteArray()
-            ),
-            BundleEntry(DiagnosticsSchema.SUMMARY_FILE, "", summary.toByteArray()),
-            BundleEntry(DiagnosticsSchema.README_FILE, "", readme().toByteArray())
+                pretty.encodeToString(JsonElement.serializer(), manifest).toByteArray()
+            )
         ) + entries
         return BundlePlan(all, finalReport, summary)
+    }
+
+    private fun identitySection(
+        meta: JsonObject?,
+        captureId: String?,
+        captureSeq: Long?,
+        startMono: Long?,
+        stopMono: Long?,
+        inputs: ExportInputs
+    ): JsonObject = buildJsonObject {
+        put("session_id", meta?.get("session_id") ?: JsonNull)
+        put("capture_id", captureId)
+        put("native_capture_seq", captureSeq)
+        put("game_run_id", meta?.get("game_run_id") ?: JsonNull)
+        val process = meta?.get("process")?.asObject()
+        put("process_instance_id", process?.get("process_instance_id") ?: JsonNull)
+        put(
+            "exported_by_same_process",
+            process?.str("process_instance_id")?.let { id ->
+                inputs.currentProcess?.str("process_instance_id")?.let { it == id }
+            }
+        )
+        put(
+            "clock",
+            buildJsonObject {
+                put("domain", "CLOCK_MONOTONIC milliseconds (uptimeMillis / steady_clock)")
+                put("capture_start_mono_ms", startMono)
+                put("capture_stop_mono_ms", stopMono)
+                put("log_clock_origin_mono_ms", meta?.get("log_clock_origin_mono_ms") ?: JsonNull)
+                put(
+                    "note",
+                    "UTC fields are for presentation; correlate with mono_ms. A log line at " +
+                        "[s] maps to log_clock_origin_mono_ms + s * 1000."
+                )
+            }
+        )
+    }
+
+    private fun filterSettings(settings: JsonElement?): JsonElement {
+        val array = settings as? JsonArray ?: return settings ?: JsonNull
+        return JsonArray(
+            array.filter { it.asObject()?.str("name") !in EXCLUDED_SETTING_NAMES }
+        )
+    }
+
+    /** Integrity and coverage of the bundle: what was recorded, what is missing and why. */
+    private fun manifest(
+        files: List<Pair<String, ByteArray>>,
+        report: JsonObject,
+        samples: List<JsonObject>,
+        meta: JsonObject?
+    ): JsonObject {
+        val interval = meta.num("interval_ms") ?: 0.0
+        val times = samples.mapNotNull { it.num("t_ms") }
+        val gaps = times.zipWithNext().filter { (a, b) -> interval > 0 && b - a > interval * 1.5 }
+        val duration = meta.num("duration_ms")
+        val incomplete = mutableListOf<String>()
+        if (meta == null) incomplete += "no_capture"
+        if (meta != null && meta.str("state") != DiagnosticsSchema.STATE_COMPLETED) {
+            incomplete += "capture_not_completed"
+        }
+        if ((report["native_summary"]?.asObject()?.get("available") as? JsonPrimitive)
+            ?.content == "false"
+        ) {
+            incomplete += "native_summary_missing"
+        }
+        val log = report["log_coverage"]?.asObject()
+        if (options.includeEdenLog && (log?.get("complete") as? JsonPrimitive)?.content != "true") {
+            incomplete += "log_incomplete"
+        }
+        val droppedEvents = report["events"]?.asObject()?.get("native_scope")?.asObject()
+            .num("dropped_this_capture") ?: 0.0
+        if (droppedEvents > 0) incomplete += "native_events_dropped"
+        if (gaps.isNotEmpty()) incomplete += "sample_gaps"
+        return buildJsonObject {
+            put("schema_version", DiagnosticsSchema.SCHEMA_VERSION)
+            put("capture_id", report["identity"]?.asObject()?.get("capture_id") ?: JsonNull)
+            put("complete", incomplete.isEmpty())
+            put("incomplete_reasons", buildJsonArray { incomplete.forEach { add(it) } })
+            put(
+                "files",
+                buildJsonArray {
+                    files.forEach { (name, bytes) ->
+                        add(
+                            buildJsonObject {
+                                put("name", name)
+                                put("bytes", bytes.size)
+                                put("sha256", sha256(bytes))
+                            }
+                        )
+                    }
+                }
+            )
+            put(
+                "samples",
+                buildJsonObject {
+                    put("count", samples.size)
+                    put("interval_ms", interval)
+                    put(
+                        "expected_approx",
+                        duration?.takeIf { interval > 0 }?.let { (it / interval).toLong() }
+                    )
+                    put("first_t_ms", times.minOrNull())
+                    put("last_t_ms", times.maxOrNull())
+                    put("gaps", gaps.size)
+                    put("max_gap_ms", gaps.maxOfOrNull { it.second - it.first })
+                    put(
+                        "gap_list",
+                        buildJsonArray {
+                            gaps.take(20).forEach { (a, b) ->
+                                add(
+                                    buildJsonObject {
+                                        put("after_t_ms", a)
+                                        put("gap_ms", b - a)
+                                    }
+                                )
+                            }
+                        }
+                    )
+                }
+            )
+            put("log", log ?: JsonNull)
+            put(
+                "native_events",
+                report["events"]?.asObject()?.get("native_scope") ?: JsonNull
+            )
+        }
     }
 
     private fun deviceSection(device: JsonElement?): JsonElement {
@@ -222,6 +473,10 @@ class DiagnosticsReportBuilder(
         put("redaction_applied", true)
         put("redacted_values", redactor.replacements)
         put("device_identity_included", options.includeDeviceIdentity)
+        put(
+            "excluded_settings",
+            buildJsonArray { EXCLUDED_SETTING_NAMES.forEach { add(it) } }
+        )
         put(
             "never_included",
             buildJsonArray {
@@ -600,6 +855,42 @@ class DiagnosticsReportBuilder(
                 appendLine("In-game stage: ${redactor.redactText(stage)}")
             }
             appendLine()
+            val ids = report["identity"]?.asObject()
+            val end = report["session_end"]?.asObject()
+            val logCoverage = report["log_coverage"]?.asObject()
+            val scope = report["events"]?.asObject()?.get("native_scope")?.asObject()
+            appendLine("== Integrity ==")
+            appendLine(
+                "Capture: ${ids.str("capture_id")}  native seq ${ids.str("native_capture_seq")}" +
+                    "  game run ${ids.str("game_run_id")}"
+            )
+            appendLine("Process: ${ids.str("process_instance_id")}")
+            appendLine("End: ${end.str("classification")} (${end.str("evidence")})")
+            appendLine(
+                "Native events: ${(report["events"]?.asObject()?.get("native") as? JsonArray)
+                    ?.size ?: 0} in capture, " +
+                    "${(report["events"]?.asObject()?.get("native_context") as? JsonArray)
+                        ?.size ?: 0} context, " +
+                    "dropped in capture ${scope.str("dropped_this_capture")}"
+            )
+            appendLine(
+                if ((logCoverage?.get("available") as? JsonPrimitive)?.content == "true") {
+                    "Log: ${logCoverage.str("source")}, complete=${logCoverage.str("complete")}, " +
+                        "start found=${logCoverage.str("capture_start_found")}, " +
+                        "stop found=${logCoverage.str("capture_stop_found")}, " +
+                        "omitted ${logCoverage.str("omitted_bytes")} B"
+                } else {
+                    "Log: not included (${logCoverage.str("reason")})"
+                }
+            )
+            val changes = report["identity_changes"] as? JsonArray
+            if (!changes.isNullOrEmpty()) {
+                appendLine("Changed during capture (report keeps start values):")
+                changes.forEach { c ->
+                    appendLine("    ${c.asObject().str("field")}")
+                }
+            }
+            appendLine()
             appendLine("== Build / device ==")
             appendLine("Eden: ${build.str("version")} (${build.str("description")})")
             appendLine("Branch: ${build.str("branch")}")
@@ -691,7 +982,10 @@ class DiagnosticsReportBuilder(
             appendLine(
                 "Process CPU (% of one core) avg/max: ${cpu.num1("avg")} / ${cpu.num1("max")}"
             )
-            appendLine("RSS peak (VmHWM): ${android.mib("rss_peak_kb_max")} MiB")
+            appendLine(
+                "RSS peak (VmHWM, process lifetime, not this capture): " +
+                    "${android.mib("rss_peak_kb_max")} MiB"
+            )
             appendLine(
                 "Min available system memory: ${android.mib("system_mem_available_kb_min")} MiB"
             )
@@ -790,6 +1084,13 @@ class DiagnosticsReportBuilder(
         const val MARKER_AFTER_MS = 5_000L
         const val HITCH_THRESHOLD_MS = 100L
         const val MAX_HITCHES = 10
+
+        /** Console identifiers left out of exports; the emulator keeps using its values. */
+        val EXCLUDED_SETTING_NAMES = setOf("serial_battery", "serial_unit")
+
+        fun sha256(bytes: ByteArray): String =
+            java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+                .joinToString("") { String.format(Locale.ROOT, "%02x", it) }
         private val SUMMARY_TIMERS = listOf(
             "pipeline_build_wait",
             "fence_wait",

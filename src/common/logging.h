@@ -139,6 +139,9 @@ void Stop();
 /// Writes buffered log entries to their backends, e.g. before the log file is copied
 void Flush();
 
+/// Time since the logger started, the clock of the "[  seconds]" prefix of each log line
+[[nodiscard]] std::chrono::microseconds ElapsedTime();
+
 /// The global filter will prevent any messages from even being processed if they are filtered.
 void SetGlobalFilter(const Filter& filter);
 void SetColorConsoleBackendEnabled(bool enabled);

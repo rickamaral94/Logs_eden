@@ -36,6 +36,13 @@ constexpr std::array EXCLUDED_CATEGORIES{
     Settings::Category::Screenshots,
 };
 
+// Console identifiers that are not needed to reproduce an issue. The values used by the emulator
+// are not changed; they are only left out of the export.
+constexpr std::array<std::string_view, 2> EXCLUDED_SETTINGS{
+    "serial_battery",
+    "serial_unit",
+};
+
 // String settings are free text (names, paths, device ids); only these are known to be safe.
 constexpr std::array<std::string_view, 3> ALLOWED_STRING_SETTINGS{
     "log_filter",
@@ -51,6 +58,9 @@ json SettingsJson() {
         }
         for (const auto* setting : settings) {
             const std::string label = setting->GetLabel();
+            if (std::ranges::find(EXCLUDED_SETTINGS, label) != EXCLUDED_SETTINGS.end()) {
+                continue;
+            }
             if (setting->TypeId() == "string" &&
                 std::ranges::find(ALLOWED_STRING_SETTINGS, label) ==
                     ALLOWED_STRING_SETTINGS.end()) {
@@ -107,6 +117,11 @@ json StaticInfoJson() {
     out["android_api_level_native"] = android_get_device_api_level();
     out["cpu_backend"] = Settings::IsNceEnabled() ? "NCE" : "JIT";
     out["stage"] = std::string{Diag::StageName(Diag::GetStage())};
+    out["capture_seq"] = Diag::CaptureSequence();
+    out["game_run_id"] = Diag::GameRunId();
+    out["mono_ms"] = Diag::MonotonicMs();
+    // Maps the "[ seconds]" prefix of eden_log.txt lines to the monotonic clock.
+    out["log_elapsed_us"] = Common::Log::ElapsedTime().count();
     out["game"] = GameJson();
     out["settings"] = SettingsJson();
     out["sections"] = sections.is_discarded() ? json::object() : std::move(sections);
@@ -139,6 +154,11 @@ void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_stopCapture(JNIEnv* e
 
 void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_flushLog(JNIEnv* env, jobject obj) {
     Common::Log::Flush();
+}
+
+jlong Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_captureSequence(JNIEnv* env,
+                                                                           jobject obj) {
+    return static_cast<jlong>(Diag::CaptureSequence());
 }
 
 jboolean Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_isCapturing(JNIEnv* env,

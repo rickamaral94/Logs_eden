@@ -84,6 +84,14 @@ extern std::atomic<bool> g_capturing;
 bool StartCapture(std::string session_dir);
 void StopCapture();
 
+/// Sequence number of the current (or last) capture in this process, 0 before the first one.
+/// Every event carries the sequence of the capture that was active when it was recorded.
+[[nodiscard]] u64 CaptureSequence() noexcept;
+
+/// Starts a new game run (one emulated title from boot to shutdown) and returns its id.
+u64 BeginGameRun() noexcept;
+[[nodiscard]] u64 GameRunId() noexcept;
+
 void SetStage(Stage stage) noexcept;
 [[nodiscard]] Stage GetStage() noexcept;
 

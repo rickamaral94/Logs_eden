@@ -98,7 +98,8 @@ struct Event {
     u64 seq{};
     s64 mono_ms{};
     s64 last_mono_ms{};
-    bool during_capture{};
+    u64 capture_seq{}; ///< 0 when no capture was active
+    u64 game_run{};
     Severity severity{};
     Stage stage{};
     std::string category;
@@ -122,6 +123,7 @@ struct State {
     u64 next_event_seq{1};
     u64 last_sampled_seq{};
     u64 events_dropped{};
+    u64 capture_events_dropped{};
 
     std::mutex sections_mutex;
     std::map<std::string, std::string, std::less<>> sections;
@@ -132,9 +134,12 @@ struct State {
     std::mutex capture_mutex;
     std::string session_dir;
     s64 capture_start_ms{};
+    s64 capture_stop_ms{};
     s64 last_sample_ms{};
     u64 sample_index{};
 
+    std::atomic<u64> capture_seq{};
+    std::atomic<u64> game_run{};
     std::atomic<Stage> stage{Stage::Unknown};
     std::atomic<u32> long_frame_events{};
 };
@@ -285,7 +290,9 @@ json EventJson(const Event& event) {
         {"seq", event.seq},
         {"mono_ms", event.mono_ms},
         {"last_mono_ms", event.last_mono_ms},
-        {"during_capture", event.during_capture},
+        {"during_capture", event.capture_seq != 0},
+        {"capture_seq", event.capture_seq},
+        {"game_run_id", event.game_run},
         {"severity", SeverityName(event.severity)},
         {"stage", StageName(event.stage)},
         {"category", event.category},
@@ -339,23 +346,34 @@ json SummaryObject(State& state) {
         }
     }
     s64 start_ms;
+    s64 stop_ms;
     u64 samples;
     {
         std::scoped_lock lock{state.capture_mutex};
         start_ms = state.capture_start_ms;
+        stop_ms = state.capture_stop_ms;
         samples = state.sample_index;
     }
     u64 dropped_events;
+    u64 capture_dropped_events;
     {
         std::scoped_lock lock{state.events_mutex};
         dropped_events = state.events_dropped;
+        capture_dropped_events = state.capture_events_dropped;
     }
+    const bool capturing = IsCapturing();
+    const s64 end_ms = capturing || stop_ms == 0 ? MonotonicMs() : stop_ms;
     return json{
-        {"capturing", IsCapturing()},
+        {"capturing", capturing},
+        {"capture_seq", state.capture_seq.load(std::memory_order_relaxed)},
+        {"game_run_id", state.game_run.load(std::memory_order_relaxed)},
         {"capture_start_mono_ms", start_ms},
-        {"duration_ms", start_ms != 0 ? MonotonicMs() - start_ms : 0},
+        {"capture_stop_mono_ms", capturing || stop_ms == 0 ? json(nullptr) : json(stop_ms)},
+        {"duration_ms", start_ms != 0 ? end_ms - start_ms : 0},
         {"samples", samples},
         {"events_dropped", dropped_events},
+        {"capture_events_dropped", capture_dropped_events},
+        {"event_ring_capacity", MaxEvents},
         {"timers", std::move(timers)},
         {"counters", std::move(counters)},
         {"frames", std::move(frames)},
@@ -440,10 +458,15 @@ bool StartCapture(std::string session_dir) {
     ResetCaptureData(state);
     {
         std::scoped_lock events_lock{state.events_mutex};
-        state.last_sampled_seq = 0;
+        // Samples only carry events recorded after this point; older ones (previous captures,
+        // renderer initialization) stay available as context through EventsJson.
+        state.last_sampled_seq = state.next_event_seq - 1;
+        state.capture_events_dropped = 0;
+        state.capture_seq.fetch_add(1, std::memory_order_relaxed);
     }
     state.session_dir = std::move(session_dir);
     state.capture_start_ms = MonotonicMs();
+    state.capture_stop_ms = 0;
     state.last_sample_ms = state.capture_start_ms;
     state.sample_index = 0;
     Detail::g_capturing.store(true, std::memory_order_relaxed);
@@ -453,7 +476,22 @@ bool StartCapture(std::string session_dir) {
 void StopCapture() {
     auto& state = GetState();
     std::scoped_lock lock{state.capture_mutex};
+    if (IsCapturing()) {
+        state.capture_stop_ms = MonotonicMs();
+    }
     Detail::g_capturing.store(false, std::memory_order_relaxed);
+}
+
+u64 CaptureSequence() noexcept {
+    return GetState().capture_seq.load(std::memory_order_relaxed);
+}
+
+u64 BeginGameRun() noexcept {
+    return GetState().game_run.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+u64 GameRunId() noexcept {
+    return GetState().game_run.load(std::memory_order_relaxed);
 }
 
 void SetStage(Stage stage) noexcept {
@@ -522,9 +560,13 @@ void RecordEvent(Severity severity, std::string_view category, std::string_view 
     const s64 now = MonotonicMs();
     const Stage stage = GetStage();
     std::scoped_lock lock{state.events_mutex};
+    // Read under the events lock so the sequence matches the one StartCapture increments.
+    const u64 capture_seq = IsCapturing() ? state.capture_seq.load(std::memory_order_relaxed) : 0;
+    const u64 game_run = state.game_run.load(std::memory_order_relaxed);
     if (!state.events.empty()) {
         Event& last = state.events.back();
-        if (last.seq > state.last_sampled_seq && last.severity == severity && last.stage == stage &&
+        if (last.seq > state.last_sampled_seq && last.capture_seq == capture_seq &&
+            last.game_run == game_run && last.severity == severity && last.stage == stage &&
             last.category == category && last.name == name && last.fields == fields) {
             ++last.repeat;
             last.last_mono_ms = now;
@@ -532,6 +574,9 @@ void RecordEvent(Severity severity, std::string_view category, std::string_view 
         }
     }
     if (state.events.size() >= MaxEvents) {
+        if (capture_seq != 0 && state.events.front().capture_seq == capture_seq) {
+            ++state.capture_events_dropped;
+        }
         state.events.pop_front();
         ++state.events_dropped;
     }
@@ -539,7 +584,8 @@ void RecordEvent(Severity severity, std::string_view category, std::string_view 
         .seq = state.next_event_seq++,
         .mono_ms = now,
         .last_mono_ms = now,
-        .during_capture = IsCapturing(),
+        .capture_seq = capture_seq,
+        .game_run = game_run,
         .severity = severity,
         .stage = stage,
         .category = std::string{category},
@@ -575,6 +621,7 @@ std::string TakeSampleJson() {
     {
         std::scoped_lock lock{state.capture_mutex};
         out["sample_index"] = state.sample_index++;
+        out["capture_seq"] = state.capture_seq.load(std::memory_order_relaxed);
         out["mono_ms"] = now;
         out["t_ms"] = state.capture_start_ms != 0 ? now - state.capture_start_ms : 0;
         out["window_ms"] = now - state.last_sample_ms;

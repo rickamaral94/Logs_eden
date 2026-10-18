@@ -417,6 +417,13 @@ void Flush() {
         logging_instance->ForEachBackend([](Backend& backend) { backend.Flush(); });
 }
 
+std::chrono::microseconds ElapsedTime() {
+    if (!logging_instance)
+        return std::chrono::microseconds{0};
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - logging_instance->time_origin);
+}
+
 void SetGlobalFilter(const Filter& filter) {
     if (logging_instance)
         logging_instance->filter = filter;

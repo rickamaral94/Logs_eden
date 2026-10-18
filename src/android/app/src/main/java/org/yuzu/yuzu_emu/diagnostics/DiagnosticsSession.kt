@@ -86,12 +86,16 @@ object DiagnosticsSession {
     private val json = Json { prettyPrint = false }
     private val pretty = Json { prettyPrint = true }
     private val lock = Any()
+    private val sampleLock = Any()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _state = MutableStateFlow<CaptureState>(CaptureState.Idle)
     val state: StateFlow<CaptureState> = _state.asStateFlow()
 
     private var samplingJob: Job? = null
+    private var sampler: AndroidMetricsSampler? = null
+
+    @Volatile
     private var sessionDir: File? = null
     private var sessionMeta: JsonObject? = null
     private var startedUptimeMs = 0L
@@ -131,15 +135,32 @@ object DiagnosticsSession {
         }
 
         val app = context.applicationContext
+        // Flushed first so the offset below is where this capture's log lines begin.
+        runCatching { NativeDiagnostics.flushLog() }
+        val logOffset = edenLogFile()?.takeIf { it.isFile }?.length()
         val nativeStatic = parseNative(
             runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}")
         )
+        val nativeObject = nativeStatic as? JsonObject
+        val logOriginMono = nativeObject?.let { n ->
+            val mono = n.num("mono_ms") ?: return@let null
+            val elapsedUs = n.num("log_elapsed_us") ?: return@let null
+            (mono - elapsedUs / 1000.0).toLong()
+        }
+        val process = ProcessIdentity.current(app)
         val meta = buildJsonObject {
             put("session_format_version", DiagnosticsSchema.SESSION_FORMAT_VERSION)
             put("session_id", id)
+            // One session holds exactly one capture; the ids are kept apart for the format.
+            put("capture_id", id)
             put("state", DiagnosticsSchema.STATE_ACTIVE)
             put("started_at_utc", utcNow())
+            put("started_wall_ms", System.currentTimeMillis())
             put("started_uptime_ms", SystemClock.uptimeMillis())
+            put("process", process)
+            put("game_run_id", nativeObject?.get("game_run_id") ?: JsonPrimitive(null as Long?))
+            put("log_start_offset_bytes", logOffset)
+            put("log_clock_origin_mono_ms", logOriginMono)
             put("level", options.level.id)
             put("interval_ms", options.level.intervalMs)
             put("max_duration_ms", options.maxDurationMs)
@@ -180,9 +201,21 @@ object DiagnosticsSession {
             dir.deleteRecursively()
             return "native_start_failed"
         }
+        val startedMeta = JsonObject(
+            meta + (
+                "native_capture_seq" to JsonPrimitive(
+                    runCatching { NativeDiagnostics.captureSequence() }.getOrNull()
+                )
+                ) + ("started_mono_ms" to JsonPrimitive(SystemClock.uptimeMillis()))
+        )
+        runCatching {
+            File(dir, DiagnosticsSchema.SESSION_FILE).writeText(
+                pretty.encodeToString(JsonElement.serializer(), startedMeta)
+            )
+        }
 
         sessionDir = dir
-        sessionMeta = meta
+        sessionMeta = startedMeta
         appContext = app
         startedUptimeMs = SystemClock.uptimeMillis()
         markerCount = 0
@@ -197,6 +230,7 @@ object DiagnosticsSession {
         )
 
         val sampler = AndroidMetricsSampler(app, options.level == CaptureLevel.Detailed)
+        this.sampler = sampler
         samplingJob = scope.launch {
             while (isActive) {
                 delay(options.level.intervalMs)
@@ -248,6 +282,11 @@ object DiagnosticsSession {
             samplingJob = null
             appContext?.let { unregisterSystemCallbacks(it) }
 
+            // Drain the partial window since the last sample, then stop the native capture so
+            // the summary below is final (capturing=false, fixed duration).
+            sampler?.let { writeSample(it) }
+            sampler = null
+            runCatching { NativeDiagnostics.stopCapture() }
             appendEvent(
                 buildJsonObject {
                     put("type", "capture_stopped")
@@ -260,7 +299,6 @@ object DiagnosticsSession {
             val nativeStatic = parseNative(
                 runCatching { NativeDiagnostics.staticInfo() }.getOrDefault("{}")
             )
-            runCatching { NativeDiagnostics.stopCapture() }
 
             val endUptime = SystemClock.uptimeMillis()
             runCatching {
@@ -276,12 +314,16 @@ object DiagnosticsSession {
                 )
             }.onFailure { Log.error("[Diagnostics] Failed to write end state: ${it.message}") }
 
+            Log.info("[Diagnostics] Capture ${dir.name} stopped ($reason)")
+            runCatching { NativeDiagnostics.flushLog() }
             val meta = sessionMeta
             if (meta != null) {
                 val updated = JsonObject(
                     meta + mapOf(
                         "state" to JsonPrimitive(DiagnosticsSchema.STATE_COMPLETED),
                         "ended_at_utc" to JsonPrimitive(utcNow()),
+                        "ended_mono_ms" to JsonPrimitive(endUptime),
+                        "log_stop_offset_bytes" to JsonPrimitive(edenLogFile()?.length()),
                         "duration_ms" to JsonPrimitive(endUptime - startedUptimeMs),
                         "end_reason" to JsonPrimitive(reason),
                         "samples" to JsonPrimitive(sampleCount),
@@ -294,7 +336,6 @@ object DiagnosticsSession {
                     )
                 }
             }
-            Log.info("[Diagnostics] Capture ${dir.name} stopped ($reason)")
             sessionDir = null
             sessionMeta = null
             appContext = null
@@ -357,11 +398,13 @@ object DiagnosticsSession {
         return info.directory.deleteRecursively()
     }
 
-    private fun writeSample(sampler: AndroidMetricsSampler): String? {
-        val dir = synchronized(lock) { sessionDir } ?: return null
+    // Takes sampleLock only, never lock: stop() holds lock while it drains the last window.
+    private fun writeSample(sampler: AndroidMetricsSampler): String? = synchronized(sampleLock) {
+        val dir = sessionDir ?: return null
         val native = parseNative(runCatching { NativeDiagnostics.takeSample() }.getOrDefault("{}"))
         val android = runCatching { sampler.sample() }.getOrElse { errorJson(it) }
         val line = buildJsonObject {
+            put("capture_id", dir.name)
             put("t_ms", SystemClock.uptimeMillis() - startedUptimeMs)
             put("mono_ms", SystemClock.uptimeMillis())
             put("native", native)
@@ -482,6 +525,10 @@ object DiagnosticsSession {
             lines.count { it.contains("\"user_marker\"") }
         }
     }.getOrDefault(0)
+
+    fun edenLogFile(): File? = DirectoryInitialization.userDirectory?.let {
+        File(File(it, "log"), "eden_log.txt")
+    }
 
     internal fun parseNative(raw: String): JsonElement =
         runCatching { Json.parseToJsonElement(raw) }.getOrElse {

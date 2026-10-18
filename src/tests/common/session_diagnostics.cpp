@@ -156,6 +156,60 @@ TEST_CASE("SessionDiagnostics: events are kept outside a capture", "[common]") {
     REQUIRE(events.back()["during_capture"] == false);
 }
 
+TEST_CASE("SessionDiagnostics: sequential captures do not share events", "[common]") {
+    FreshCapture();
+    const u64 first = CaptureSequence();
+    RecordEvent(Severity::Info, "test", "first_capture_event");
+    StopCapture();
+    RecordEvent(Severity::Info, "test", "between_captures");
+
+    REQUIRE(StartCapture(""));
+    const u64 second = CaptureSequence();
+    REQUIRE(second == first + 1);
+    RecordEvent(Severity::Info, "test", "second_capture_event");
+
+    // The first sample of a capture only holds events recorded during it.
+    const json sample = json::parse(TakeSampleJson());
+    REQUIRE(sample["capture_seq"] == second);
+    REQUIRE(sample["events"].size() == 1);
+    REQUIRE(sample["events"][0]["name"] == "second_capture_event");
+    REQUIRE(sample["events"][0]["capture_seq"] == second);
+
+    // The ring keeps the older events as context, tagged with their own capture.
+    for (const auto& event : json::parse(EventsJson())) {
+        if (event["name"] == "first_capture_event") {
+            REQUIRE(event["capture_seq"] == first);
+        } else if (event["name"] == "between_captures") {
+            REQUIRE(event["capture_seq"] == 0);
+            REQUIRE(event["during_capture"] == false);
+        }
+    }
+    StopCapture();
+}
+
+TEST_CASE("SessionDiagnostics: summary after stop is final", "[common]") {
+    FreshCapture();
+    std::this_thread::sleep_for(20ms);
+    StopCapture();
+    const json first = json::parse(SessionSummaryJson());
+    REQUIRE(first["capturing"] == false);
+    REQUIRE(first["capture_stop_mono_ms"].is_number());
+    std::this_thread::sleep_for(20ms);
+    const json second = json::parse(SessionSummaryJson());
+    REQUIRE(second["duration_ms"] == first["duration_ms"]);
+    REQUIRE(first["duration_ms"].get<s64>() >= 20);
+}
+
+TEST_CASE("SessionDiagnostics: events carry the game run", "[common]") {
+    FreshCapture();
+    const u64 run = BeginGameRun();
+    REQUIRE(GameRunId() == run);
+    RecordEvent(Severity::Info, "test", "in_game_run");
+    const json events = json::parse(TakeSampleJson())["events"];
+    REQUIRE(events.back()["game_run_id"] == run);
+    StopCapture();
+}
+
 TEST_CASE("SessionDiagnostics: sections and samplers", "[common]") {
     FreshCapture();
     SetSection("test_section", R"({"value":1})");

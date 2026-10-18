@@ -29,8 +29,10 @@ class DiagnosticsReportBuilderTest {
         root = Files.createTempDirectory("eden-diag-test").toFile()
         session = File(root, "sessions/20260101-000000-0001").apply { mkdirs() }
         File(session, DiagnosticsSchema.SESSION_FILE).writeText(
-            """{"session_format_version":1,"session_id":"20260101-000000-0001","state":"completed",
+            """{"session_format_version":2,"session_id":"20260101-000000-0001",
+            "capture_id":"20260101-000000-0001","native_capture_seq":2,"state":"completed",
             "started_at_utc":"2026-01-01T00:00:00.000Z","level":"standard","duration_ms":6000,
+            "interval_ms":2000,"process":{"process_instance_id":"boot1-pid10-start5","pid":10},
             "end_reason":"user","stage_note":"Boss fight in /storage/emulated/0/secret"}"""
         )
         File(session, DiagnosticsSchema.STATIC_START_FILE).writeText(
@@ -38,18 +40,23 @@ class DiagnosticsReportBuilderTest {
             "device":{"identity":{"manufacturer":"Maker","model":"Phone 1"},"android_api":34},
             "graphics_driver":{"selection":"system"},
             "game":{"known":true,"title":"Test Title","program_id":"0100000000010000"},
-            "native":{"build":{"version":"v0"},"cpu_backend":"NCE","settings":[],
+            "native":{"build":{"version":"v0"},"cpu_backend":"NCE",
+              "settings":[{"name":"serial_unit","value":"217324292"},
+                {"name":"resolution_setup","value":"2"}],
               "sections":{"vulkan_device":{"device_name":"GPU X","api_version":"1.3.0"}},
               "events":[]},
             "metric_definitions":{}}"""
         )
         File(session, DiagnosticsSchema.STATIC_END_FILE).writeText(
             """{"native_summary":{"frames":{"guest_present_interval":{"count":10,"p99_ms":40.0}},
-              "counters":{"graphics_pipeline_cache_miss":3},"timers":{}},
+              "counters":{"graphics_pipeline_cache_miss":3},"timers":{},"capture_seq":2,
+              "capture_start_mono_ms":1000,"capture_stop_mono_ms":7000,"capturing":false},
             "native":{"build":{"version":"v0"},"cpu_backend":"NCE","settings":[],
               "sections":{"vulkan_device":{"device_name":"GPU X","api_version":"1.3.0"},
                 "shader_cache":{"pipelines_in_file":5,"pipelines_restored":5}},
-              "events":[{"name":"check_failed","fields":{"function":"vk::Device::Create"}}]}}"""
+              "events":[{"seq":1,"name":"long_frame","capture_seq":1,"mono_ms":500},
+                {"seq":2,"name":"check_failed","capture_seq":2,"mono_ms":2000,
+                 "fields":{"function":"vk::Device::Create"}}]}}"""
         )
         val samples = (1..3).joinToString("\n") { i ->
             """{"t_ms":${i * 2000},"mono_ms":${1000 + i * 2000},
@@ -78,10 +85,16 @@ class DiagnosticsReportBuilderTest {
         root.deleteRecursively()
     }
 
+    private val sessionId = "20260101-000000-0001"
+
     private fun build(options: ExportOptions = ExportOptions()): BundlePlan {
         val log = File(root, "eden_log.txt").apply {
             writeText(
-                "line /storage/emulated/0/Roms/a.nsp\n"
+                "[   1.0] Core <Info> line /storage/emulated/0/Roms/a.nsp\n" +
+                    "[   2.0] Frontend <Info> [Diagnostics] Capture $sessionId started\n" +
+                    "[   3.0] HW.Memory <Error> Unmapped Device ReadBlock @ 0x0\n" +
+                    "[   9.0] Frontend <Info> [Diagnostics] Capture $sessionId stopped\n" +
+                    "[  10.0] Core <Info> next title\n"
             )
         }
         val inputs = ExportInputs(
@@ -246,6 +259,50 @@ class DiagnosticsReportBuilderTest {
             )
         }
         assertFalse(File(root, "exports/bundle.zip.partial").exists())
+    }
+
+    @Test
+    fun nativeEventsOfOtherCapturesAreContext() {
+        val events = build().report["events"]!!.jsonObject
+        val capture = events["native"]!!.jsonArray
+        val context = events["native_context"]!!.jsonArray
+        assertEquals(1, capture.size)
+        assertEquals("check_failed", capture[0].jsonObject["name"]!!.jsonPrimitive.content)
+        assertEquals(1, context.size)
+        assertEquals("false", context[0].jsonObject["during_capture"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun consoleIdentifiersAreNotExported() {
+        val plan = build()
+        val all = plan.entries.joinToString("\n") { String(it.content) }
+        assertFalse(all.contains("217324292"))
+        val names = plan.report["settings"]!!.jsonArray.map {
+            it.jsonObject["name"]!!.jsonPrimitive.content
+        }
+        assertEquals(listOf("resolution_setup"), names)
+    }
+
+    @Test
+    fun manifestListsFilesWithHashesAndCoverage() {
+        val plan = build()
+        val manifest = Json.parseToJsonElement(
+            String(plan.entries.single { it.name == DiagnosticsSchema.MANIFEST_FILE }.content)
+        ).jsonObject
+        val files = manifest["files"]!!.jsonArray.map { it.jsonObject }
+        val report = files.single { it["name"]!!.jsonPrimitive.content == "report.json" }
+        assertEquals(64, report["sha256"]!!.jsonPrimitive.content.length)
+        assertTrue(files.any { it["name"]!!.jsonPrimitive.content == "logs/eden_log.txt" })
+        assertEquals("3", manifest["samples"]!!.jsonObject["count"]!!.jsonPrimitive.content)
+        val log = plan.report["log_coverage"]!!.jsonObject
+        assertEquals("true", log["complete"]!!.jsonPrimitive.content)
+        val logText = String(plan.entries.single { it.name == "logs/eden_log.txt" }.content)
+        assertFalse(logText.contains("next title"))
+        assertTrue(logText.contains("Unmapped"))
+        assertEquals(
+            "user_stopped_capture",
+            plan.report["session_end"]!!.jsonObject["classification"]!!.jsonPrimitive.content
+        )
     }
 
     @Test

@@ -57,6 +57,7 @@ void CreateGPU(std::optional<Tegra::GPU>& gpu, Core::Frontend::EmuWindow& emu_wi
     auto context = emu_window.CreateSharedContext();
     auto scope = context->Acquire();
     namespace Diag = Common::Diagnostics;
+    Diag::BeginGameRun();
     Diag::SetStage(Diag::Stage::RendererInit);
     try {
         auto renderer = CreateRenderer(system, emu_window, *gpu, std::move(context));

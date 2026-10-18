@@ -68,13 +68,14 @@ the bundle.
 
 | File | Content |
 | --- | --- |
-| `report.json` | Structured report, `schema_version` 1 |
+| `report.json` | Structured report, `schema_version` 2 |
+| `manifest.json` | Size and SHA-256 of every file, completeness flags, sample gaps, log and event coverage |
 | `summary.txt` | Human readable summary of `report.json` |
 | `README.txt` | Short description of the files |
 | `samples.jsonl` | Raw samples (paths redacted) |
 | `events.jsonl` | Events (fully redacted, includes user notes) |
 | `native/native_critical_*.json` | Native state written on fatal errors |
-| `logs/eden_log.txt` | Last 4 MiB of the Eden log, optional |
+| `logs/eden_log.txt` | Eden log lines of this capture, preceded by up to 64 KiB of labelled context; optional, see `log_coverage` |
 | `logs/eden_gpu.log` | GPU logger output, optional, if present |
 | `advanced/gpu_crashes/*` | GPU logger state dumps, opt-in only |
 
@@ -87,7 +88,47 @@ minute, process/system metrics and native error events. It uses only the Python 
 library and lists differences without attributing causes. Tests:
 `python3 -m unittest discover -s tools/diagnostics/tests`.
 
-## Report schema (version 1)
+## Session integrity (schema 2)
+
+A process lifetime can run several titles and several captures, and its `eden_log.txt` and
+native event ring hold all of them. Schema 2 ties every piece of data to its capture:
+
+- Identifiers: `session_id` and `capture_id` (one session holds one capture), the native
+  `native_capture_seq` (counts captures in the process; every native event carries
+  `capture_seq`, 0 outside a capture), `game_run_id` (one emulated title from renderer
+  initialization to shutdown; carried by every event) and `process_instance_id`
+  (`boot<count>-pid<pid>-start<process start uptime>`).
+- Clock: correlation uses `CLOCK_MONOTONIC` milliseconds (`mono_ms`; `SystemClock.uptimeMillis`
+  on the Java side, `steady_clock` natively). UTC is presentation only. Log lines carry seconds
+  since the logger started; `identity.clock.log_clock_origin_mono_ms` maps them.
+- Frozen identity: build, game, CPU backend, settings and the Vulkan device come from capture
+  start. `identity_changes` lists fields that differ at capture end; the start values are kept.
+- Events: `events.native` holds only events of this capture; `events.native_context` holds
+  older captures, renderer initialization and anything outside the capture, with
+  `during_capture` recomputed. `events.native_scope` gives the ring capacity and how many events
+  of this capture were overwritten. Schema 1 sessions are scoped by the monotonic capture
+  interval (`scope_method: mono_interval`). Samples only carry events recorded after the capture
+  started.
+- Stop: the partial window since the last sample is written, then the native capture is stopped
+  and the summary taken, so `native_summary.capturing` is `false` and `duration_ms` is final.
+- Log: the log is flushed through the logger (the file backend writes through a stdio buffer;
+  in the device captures that motivated this, about 3.7 KiB at the end of the file, including
+  the stop line, had not been written yet). The capture is located by its
+  `[Diagnostics] Capture <id> started/stopped` lines in the current or the previous process log
+  (`eden_log.txt.old.txt`), not by blindly copying the file. `log_coverage` gives the source,
+  byte offsets, context size, omitted bytes, whether both lines were found, whether the file
+  ends mid-line and `complete`. A capture that cannot be located yields no log rather than the
+  wrong one. `log_digest` counts levels, classes and known patterns (assert, guest panic,
+  unmapped access, unimplemented/stubbed, Vulkan errors, device lost, shader errors) separately
+  for the capture and for the context; it classifies text, it does not diagnose.
+- Exits: `exit_reasons` entries get `category` (`native_crash`, `java_crash`, `anr`,
+  `low_memory_kill`, `abort`, `killed_by_signal`, `normal_exit`, `stopped_by_user_or_system`,
+  ...) and `relation`: `capture_process` only for the same pid ending after the capture started,
+  otherwise `history`. `session_end.classification` separates `user_stopped_capture`,
+  `game_exit`, `capture_limit_reached`, `vk_error_device_lost`, `process_ended:<category>` and
+  `unknown`, with the evidence used.
+
+## Report schema (version 2)
 
 Field names are stable. Additive changes keep `schema_version`; renaming or removing a field, or
 changing its meaning or unit, increments it and must be recorded in [Changelog](#schema-changelog).
@@ -96,7 +137,10 @@ Top-level fields of `report.json`:
 
 | Field | Description |
 | --- | --- |
-| `schema_version` | Integer, currently `1` |
+| `schema_version` | Integer, currently `2`. Readers accept 1 and 2 |
+| `identity` | Session, capture, game run and process ids; clock mapping |
+| `session_end` | End classification and evidence |
+| `identity_changes` | Fields that changed between capture start and end |
 | `generated_at_utc`, `generator` | Export time and producer (`eden-android-diagnostics`) |
 | `session` | Contents of `session.json`, or `{available:false}` for a snapshot |
 | `app` | Application id, version name/code, build type, flavor |
@@ -116,9 +160,12 @@ Top-level fields of `report.json`:
 | `frame_rate` | Guest present, host present and game FPS averaged over the capture |
 | `markers` | User markers with `context` built from samples within -10 s / +5 s |
 | `hitches` | Up to 10 sample windows whose longest guest frame interval exceeds 100 ms, with the timers, counters, shader queue, CPU/GPU load and native events of the same window (correlation only) |
-| `events.native` | Native event ring (Vulkan check failures, device loss, pipeline/shader failures, init failures) |
+| `events.native` | Native events of this capture (Vulkan check failures, device loss, pipeline/shader failures, long frames, markers) |
+| `events.native_context` | Native events outside this capture, labelled |
+| `events.native_scope` | Capture sequence and interval used for scoping; ring capacity and drops |
 | `events.android` | Capture lifecycle, `trim_memory`, `low_memory`, `thermal_status_changed` |
-| `exit_reasons` | Last 5 `ApplicationExitInfo` entries (API 30+) |
+| `exit_reasons` | Last 5 `ApplicationExitInfo` entries (API 30+) with `pid`, `category` and `relation` |
+| `log_coverage`, `log_digest` | See [Session integrity](#session-integrity-schema-2) |
 | `availability` | Metric → `available`, `unavailable: <reason>` or `intermittent` |
 | `metric_definitions` | Unit, scope, source and notes of every Android/native metric |
 | `contents` | Files in the bundle with sizes |
@@ -192,6 +239,8 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 
 - Captures stay local. Sharing is user-initiated through the share sheet, after a preview.
 - Never collected: ROMs, firmware, keys, saves, credentials, the web service token, memory dumps.
+- `serial_unit` and `serial_battery` are left out of the settings list and redacted in logs;
+  the emulator keeps using its values. Other console identifiers are not exported either.
 - Settings in the `Paths`, `DataStorage`, `WebService`, `Multiplayer`, `Network`, `Controls`,
   `Shortcuts`, `Ui*` and `Screenshots` categories are excluded, as are all free-text settings
   except `log_filter`, `post_shader_chain` and `post_shader_preset`.
@@ -218,3 +267,4 @@ Produced once per renderer by `Device::GetDiagnosticsJson()`:
 | 1 (additive) | `hitches`; `sampler_cost_breakdown_ms` per sample; `level_name` on `trim_memory` events; `slow_graphics_pipeline_create` / `slow_compute_pipeline_create` native events (driver creation ≥ 250 ms, with the shader or pipeline hash); `availability` now also records `available`, so mixed results read `intermittent` |
 | 1 (additive) | `pacing` buckets (`lt_12ms`, `12_20ms`, `20_28ms`, `28_38ms`, `38_55ms`, `ge_55ms`) per window and per session frame series; `long_frame` native events (interval ≥ 100 ms, at most 100 per capture) with the exact time of each long frame |
 | 1 (additive) | `system.gpu_max_clock_mhz_kgsl`, `system.gpu_min_clock_mhz_kgsl` per sample; `gpu_busy_pct_kgsl`, `gpu_clock_mhz_kgsl` and `gpu_max_clock_mhz_kgsl` statistics in `android_summary`; `gpu_clock_mhz_kgsl` in `hitches`. The Eden log is flushed before export, so the bundled log now includes its newest lines |
+| 2 | Capture scoping: `events.native` holds only this capture (schema 1 mixed earlier captures in and kept `during_capture=true` for them), new `events.native_context`/`native_scope`; `identity`, `session_end`, `identity_changes`, `log_coverage`, `log_digest`, `manifest.json`; identity fields frozen at capture start; `exit_reasons` gain `pid`, `category`, `relation`; `native_summary.capturing` is false and `duration_ms` final after stop; `logs/eden_log.txt` holds the capture's lines instead of the file tail; `serial_unit`/`serial_battery` removed |
