@@ -177,6 +177,10 @@ class DiagnosticsReportBuilder(
             put("game", gameSection(staticStart?.get("game"), identity?.get("game")))
             put("build", identity?.get("build") ?: JsonNull)
             put("cpu_backend", identity?.get("cpu_backend") ?: JsonNull)
+            put(
+                "driver_environment",
+                identity?.get("driver_environment") ?: unavailable("not recorded by this build")
+            )
             put("settings", filterSettings(identity?.get("settings")))
             put(
                 "configuration_hashes",
@@ -254,6 +258,7 @@ class DiagnosticsReportBuilder(
                 }
             )
             put("exit_reasons", linkedExits)
+            put("driver_log", driverLogSection(dir))
             put("log_coverage", logSegment.coverage)
             put("log_digest", logSegment.digest)
             put("availability", availability(samples))
@@ -291,6 +296,13 @@ class DiagnosticsReportBuilder(
                 "logs/eden_log.txt",
                 "Eden log lines of this capture with labelled context; see log_coverage",
                 redactor.redactText(it).toByteArray()
+            )
+        }
+        dir?.let { File(it, DiagnosticsSchema.DRIVER_LOG_FILE) }?.takeIf { it.isFile }?.let {
+            entries += BundleEntry(
+                "logs/driver_logcat.txt",
+                "Logcat of this process during the capture, except Eden's own tag",
+                redactor.redactText(it.readText()).toByteArray()
             )
         }
         if (options.includeGpuLog) {
@@ -793,6 +805,19 @@ class DiagnosticsReportBuilder(
         }
     }
 
+    private fun driverLogSection(dir: File?): JsonElement {
+        val digest = dir?.let { readJson(File(it, DiagnosticsSchema.DRIVER_LOG_DIGEST_FILE)) }
+            ?: return unavailable("not recorded by this build or capture not stopped")
+        return JsonObject(
+            (digest.asObject() ?: return digest) + (
+                "note" to JsonPrimitive(
+                    "messages of the driver, Vulkan loader and system for this process; " +
+                        "Turnip only reports performance fallbacks with TU_DEBUG=perf"
+                )
+                )
+        )
+    }
+
     private fun cpuWaits(summary: JsonObject?): JsonObject {
         val byReason = summary?.get("fence_wait_by_reason")?.asObject()
             ?: return unavailable("not recorded by this build")
@@ -1242,6 +1267,34 @@ class DiagnosticsReportBuilder(
                         "dispatches ${work.num1("compute_dispatches")}, " +
                         "render passes ${work.num1("render_passes")}, upload KiB $uploadKib"
                 )
+            }
+            appendLine()
+            val driverLog = report["driver_log"]?.asObject()
+            val driverEnv = report["driver_environment"]?.asObject()
+            appendLine("== Driver messages (logcat) ==")
+            appendLine(
+                "Driver environment: " + (
+                    driverEnv?.takeIf { it["available"] == null }
+                        ?.entries?.joinToString(" ") {
+                            "${it.key}=${(it.value as? JsonPrimitive)?.content}"
+                        }
+                        ?.ifEmpty { "none" } ?: "not recorded"
+                    )
+            )
+            if ((driverLog?.get("available") as? JsonPrimitive)?.content == "true") {
+                appendLine(
+                    "Lines: ${driverLog.str("lines")}  (raw dropped ${driverLog.str(
+                        "raw_lines_dropped"
+                    )})"
+                )
+                (driverLog["messages"] as? JsonArray)?.take(10)?.forEach { m ->
+                    val msg = m.asObject()
+                    appendLine(
+                        "  ${msg.str("count")}x ${msg.str("tag")}: ${msg.str("example").take(120)}"
+                    )
+                }
+            } else {
+                appendLine("Not available: ${driverLog.str("reason")}")
             }
             appendLine()
             appendLine("== Shaders / pipelines ==")

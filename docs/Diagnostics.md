@@ -242,6 +242,23 @@ reason.
   of the enabled add-ons, plus the game build id and the observed shader cache state
   (`disk_cache_present`/`disk_cache_empty` from the pipeline cache file at title load).
 
+## Driver messages (Turnip perf mode)
+
+- Every capture streams `logcat -v epoch --pid=<own pid>` from the capture start, with Eden's
+  own tag (`YuzuNative`, already in `eden_log.txt`) silenced. Apps can only read their own
+  process' logs, so this holds the Vulkan driver, loader, AdrenoTools hooks and system messages
+  of Eden only. The bundle gets `logs/driver_logcat.txt` (first 1 MiB of lines, times relative to
+  the capture start, redacted) and the report `driver_log`: line count, dropped lines and up to
+  50 distinct messages (numbers and addresses normalized) with count, first/last time, tag and an
+  example, plus counts per tag.
+- `driver_environment` records the Mesa/Freedreno variables in effect (`TU_DEBUG`,
+  `FD_MESA_DEBUG`, `IR3_SHADER_DEBUG`, `TU_BREADCRUMBS`, `FD_RD_DUMP*`, `FD_DEV_FEATURES`, ...).
+  They are read by the driver when it loads, so they must be set before the game starts: the
+  Freedreno settings screen (global or per game) has a **Diagnostics - Turnip perf warnings**
+  preset (`TU_DEBUG=perf`) for this. Turnip then logs why it takes slower paths (sysmem instead
+  of GMEM, LRZ disabled, ...). Perf mode itself adds CPU work in the driver; compare FPS only
+  between runs with the same variables.
+
 ## Report schema (version 2)
 
 Field names are stable. Additive changes keep `schema_version`; renaming or removing a field, or
@@ -416,3 +433,4 @@ confirmed or revised with five AB/BA pairs per level on the reference device.
 | 2 (additive) | counters `pipeline_feedback_valid`, `driver_pipeline_cache_hits`; `driver_cache` field on `slow_*_pipeline_create` events |
 | 2 | `cache_sync` wait reason split into `texture_download`, `buffer_download`, `buffer_write_sync`; frame series gain `skipped_across_pause`; `emulation/paused` and `emulation/resumed` events |
 | 2 (additive) | `vulkan/turbo_mode` event (setting on/off, active) at renderer start |
+| 2 (additive) | `driver_environment`, `driver_log` and `logs/driver_logcat.txt` |

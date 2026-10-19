@@ -100,6 +100,20 @@ json GameJson() {
     };
 }
 
+// Mesa/Freedreno variables in effect for this process (set through the Freedreno settings
+// before the driver loaded). Values are debug flags, not paths.
+json DriverEnvironmentJson() {
+    json out = json::object();
+    for (const char* name : {"TU_DEBUG", "FD_MESA_DEBUG", "IR3_SHADER_DEBUG", "TU_BREADCRUMBS",
+                             "FD_RD_DUMP", "FD_RD_DUMP_FRAMES", "FD_DEV_FEATURES",
+                             "MESA_SHADER_CACHE_DISABLE", "MESA_VK_WSI_PRESENT_MODE"}) {
+        if (const char* value = getenv(name)) {
+            out[name] = value;
+        }
+    }
+    return out;
+}
+
 json StaticInfoJson() {
     json build = json::object();
     build["version"] = std::string{Common::g_build_version};
@@ -128,6 +142,7 @@ json StaticInfoJson() {
     out["log_elapsed_us"] = Common::Log::ElapsedTime().count();
     out["game"] = GameJson();
     out["settings"] = SettingsJson();
+    out["driver_environment"] = DriverEnvironmentJson();
     out["sections"] = sections.is_discarded() ? json::object() : std::move(sections);
     out["events"] = events.is_discarded() ? json::array() : std::move(events);
     return out;

@@ -55,6 +55,14 @@ opens the share sheet.
 If the game fails to start, use **Snapshot report** in the capture list to export the device,
 driver and Vulkan information plus recent errors without a capture.
 
+## Turnip performance warnings
+
+To see why the Turnip driver falls back to slower paths, open **Settings → Freedreno** (global or
+for the game), apply the **Diagnostics - Turnip perf warnings** preset, then start the game and a
+capture. The driver's messages end up in `logs/driver_logcat.txt` and are summarized in the
+report. The preset makes the driver do extra logging, so remove it (preset **Performance -
+Default**) for normal play and do not compare FPS between runs with and without it.
+
 ## Comparing two drivers or builds
 
 To compare driver A with driver B on the same scene:

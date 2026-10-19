@@ -95,6 +95,7 @@ object DiagnosticsSession {
 
     private var samplingJob: Job? = null
     private var sampler: AndroidMetricsSampler? = null
+    private var driverLog: DriverLogCollector? = null
 
     @Volatile
     private var sessionDir: File? = null
@@ -236,6 +237,11 @@ object DiagnosticsSession {
             }
         )
 
+        driverLog = DriverLogCollector(
+            android.os.Process.myPid(),
+            startedMeta["started_wall_ms"]?.let { (it as JsonPrimitive).content.toLong() }
+                ?: System.currentTimeMillis()
+        ).also { it.start() }
         val sampler = AndroidMetricsSampler(app, options.level == CaptureLevel.Detailed)
         this.sampler = sampler
         samplingJob = scope.launch {
@@ -293,6 +299,11 @@ object DiagnosticsSession {
             // the summary below is final (capturing=false, fixed duration).
             sampler?.let { writeSample(it) }
             sampler = null
+            driverLog?.let { log ->
+                runCatching { log.stop(dir) }
+                    .onFailure { Log.error("[Diagnostics] Driver log: ${it.message}") }
+            }
+            driverLog = null
             runCatching { NativeDiagnostics.stopCapture() }
             appendEvent(
                 buildJsonObject {

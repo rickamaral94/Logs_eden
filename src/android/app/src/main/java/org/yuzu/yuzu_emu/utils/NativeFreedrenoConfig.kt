@@ -153,6 +153,16 @@ object FreedrenoPresets {
         )
     )
 
+    /** Turnip performance warnings; a diagnostic capture keeps them in driver_logcat.txt. */
+    val PERF_WARNINGS = FreedrenoPreset(
+        name = "Diagnostics - Turnip perf warnings",
+        description = "Log why Turnip falls back to slower paths (sysmem, LRZ off, ...)",
+        icon = "ic_performance",
+        variables = mapOf(
+            "TU_DEBUG" to "perf"
+        )
+    )
+
     val PERFORMANCE_DEFAULT = FreedrenoPreset(
         name = "Performance - Default",
         description = "Clear all debug options for performance",
@@ -169,6 +179,7 @@ object FreedrenoPresets {
         SHADER_DEBUG,
         GPU_HANG_TRACE,
         DEV_FEATURES_UBWC_HINT,
+        PERF_WARNINGS,
         PERFORMANCE_DEFAULT
     )
 }
