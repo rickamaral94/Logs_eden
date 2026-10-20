@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include "common/diagnostics_gpu_timing.h"
+#include "common/diagnostics_render_passes.h"
 #include "common/session_diagnostics.h"
 
 namespace Common::Diagnostics {
@@ -498,6 +499,7 @@ json SummaryObject(State& state) {
         {"counters", std::move(counters)},
         {"frames", std::move(frames)},
         {"gpu_timing", ParseOrString(GpuTiming::Global().SessionJson())},
+        {"render_passes", ParseOrString(RenderPasses::Global().SessionJson())},
         {"fence_wait_by_reason", WaitReasonsJson(state.session_waits, false)},
         {"fence_wait_by_thread", std::move(wait_threads)},
     };
@@ -509,6 +511,7 @@ void ResetCaptureData(State& state) {
         count.store(0, std::memory_order_relaxed);
     }
     GpuTiming::Global().Reset();
+    RenderPasses::Global().Reset();
     for (auto& timer : state.window_timers) {
         timer.Reset();
     }
@@ -887,6 +890,7 @@ std::string TakeSampleJson() {
     }
     out["frames"] = std::move(frames);
     out["gpu_timing"] = ParseOrString(GpuTiming::Global().TakeWindowJson());
+    out["render_passes"] = ParseOrString(RenderPasses::Global().TakeWindowJson());
 
     json samplers = json::object();
     {

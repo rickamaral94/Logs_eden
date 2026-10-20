@@ -44,6 +44,8 @@ add_library(
     device_power_state.h
     diagnostics_gpu_timing.cpp
     diagnostics_gpu_timing.h
+    diagnostics_render_passes.cpp
+    diagnostics_render_passes.h
     div_ceil.h
     dynamic_library.cpp
     dynamic_library.h

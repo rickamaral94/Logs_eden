@@ -16,6 +16,7 @@
 
 #include "common/alignment.h"
 #include "common/common_types.h"
+#include "common/diagnostics_render_passes.h"
 #include "common/polyfill_thread.h"
 #include "common/session_diagnostics.h"
 #include "common/settings.h"
@@ -37,6 +38,7 @@ class GraphicsPipeline;
 class StateTracker;
 
 struct QueryCacheParams;
+struct RenderPassKey;
 
 /// The scheduler abstracts command buffer and fence management with an interface that's able to do
 /// OpenGL-like operations on Vulkan command buffers.
@@ -280,7 +282,8 @@ private:
 
     /// Begins a render pass for the given framebuffer, optionally with clear values.
     void BeginRenderPassImpl(const Framebuffer* framebuffer, VkRenderPass renderpass,
-                             const VkClearValue* clear_values, u32 clear_value_count);
+                             const RenderPassKey& key, const VkClearValue* clear_values,
+                             u32 clear_value_count);
 
     /// If a deferred clear is pending.
     void RealizeDeferredClear();
@@ -295,7 +298,8 @@ private:
 
     void EndPendingOperations();
 
-    void EndRenderPass();
+    void EndRenderPass(Common::Diagnostics::RenderPasses::EndReason reason =
+                           Common::Diagnostics::RenderPasses::EndReason::Other);
 
     void AcquireNewChunk();
 

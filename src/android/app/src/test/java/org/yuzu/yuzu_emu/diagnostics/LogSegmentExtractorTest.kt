@@ -148,6 +148,29 @@ class LogSegmentExtractorTest {
     }
 
     @Test
+    fun repeatedLinesAreCollapsedAndStillCounted() {
+        val text = line(1.0, "Render.Vulkan <Error> vk_scheduler.cpp:1: same") +
+            line(1.1, "Render.Vulkan <Error> vk_scheduler.cpp:1: same") +
+            line(1.2, "Render.Vulkan <Error> vk_scheduler.cpp:1: same") +
+            line(1.3, "Frontend <Info> other")
+        val (collapsed, removed) = LogSegmentExtractor.collapseRepeats(text)
+        assertEquals(2L, removed)
+        assertEquals(
+            line(1.0, "Render.Vulkan <Error> vk_scheduler.cpp:1: same") +
+                "#diag: previous line repeated 2 more times\n" +
+                line(1.3, "Frontend <Info> other"),
+            collapsed
+        )
+        val digest = LogSegmentExtractor.digest(collapsed)
+        assertEquals(4, digest["lines"]!!.jsonPrimitive.content.toInt())
+        assertEquals(
+            3,
+            digest["patterns"]!!.jsonObject["vulkan_error"]!!.jsonObject["count"]!!
+                .jsonPrimitive.content.toInt()
+        )
+    }
+
+    @Test
     fun findLineReturnsByteOffsets() {
         val range = LogSegmentExtractor.findLine(current, "Capture A-1 stopped")!!
         val bytes = current.readBytes()

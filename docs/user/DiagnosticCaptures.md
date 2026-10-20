@@ -63,6 +63,18 @@ capture. The driver's messages end up in `logs/driver_logcat.txt` and are summar
 report. The preset makes the driver do extra logging, so remove it (preset **Performance -
 Default**) for normal play and do not compare FPS between runs with and without it.
 
+## Reading the driver evaluation
+
+`summary.txt` starts with **Driver evaluation**: the driver and its build-id, GPU time per frame
+and GPU clock, render passes per frame (how many are empty, how many reopen the same target,
+how many attachments are loaded per pass), pipeline creation, driver messages by category and
+the Vulkan extensions Eden turned off for this driver. Lines starting with **Observation** are
+measured; lines starting with **Hypothesis** are only suggestions and name the A/B test that
+would confirm them. The same data is in `driver_evaluation.json` for driver developers.
+
+To put several captures side by side (for example two Turnip builds), run
+`python3 tools/diagnostics/eden_diag.py driver A.zip B.zip`.
+
 ## Comparing two drivers or builds
 
 To compare driver A with driver B on the same scene:

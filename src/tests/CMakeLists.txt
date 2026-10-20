@@ -9,6 +9,7 @@ add_executable(tests
     common/cityhash.cpp
     common/container_hash.cpp
     common/diagnostics_gpu_timing.cpp
+    common/diagnostics_render_passes.cpp
     common/fibers.cpp
     common/host_memory.cpp
     common/param_package.cpp

@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 #include <fmt/format.h>
@@ -24,10 +25,76 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_state_tracker.h"
 #include "video_core/renderer_vulkan/vk_texture_cache.h"
+#include "video_core/texture_cache/formatter.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace Vulkan {
+
+namespace {
+
+using RenderPassEnd = Common::Diagnostics::RenderPasses::EndReason;
+
+template <typename Handle>
+u64 HandleBits(Handle handle) {
+    if constexpr (std::is_pointer_v<Handle>) {
+        return static_cast<u64>(reinterpret_cast<uintptr_t>(handle));
+    } else {
+        return static_cast<u64>(handle);
+    }
+}
+
+std::string DescribeRenderPass(const RenderPassKey& key) {
+    const auto ops = [](bool clear, bool discard) {
+        return fmt::format("{},{}", clear ? "clear" : "load", discard ? "discard" : "store");
+    };
+    std::string out;
+    for (u32 slot = 0; slot < key.color_formats.size(); ++slot) {
+        if (key.color_formats[slot] == VideoCore::Surface::PixelFormat::Invalid) {
+            continue;
+        }
+        out += fmt::format("c{}={}({}) ", slot, key.color_formats[slot],
+                           ops((key.color_clear_mask >> slot) & 1,
+                               (key.color_discard_mask >> slot) & 1));
+    }
+    if (key.depth_format != VideoCore::Surface::PixelFormat::Invalid) {
+        out += fmt::format("ds={}({}) ", key.depth_format,
+                           ops(key.depth_stencil_clear, key.depth_stencil_discard));
+    }
+    out += fmt::format("x{}", static_cast<u32>(key.samples));
+    if (key.resolve_color || key.resolve_depth_stencil) {
+        out += " resolve";
+    }
+    return out;
+}
+
+void ProfileRenderPass(VkRenderPass renderpass, VkFramebuffer framebuffer, VkExtent2D extent,
+                       const RenderPassKey& key) {
+    u32 colors = 0;
+    for (const auto format : key.color_formats) {
+        colors += format != VideoCore::Surface::PixelFormat::Invalid ? 1 : 0;
+    }
+    const Common::Diagnostics::RenderPasses::PassInfo info{
+        .render_pass = HandleBits(renderpass),
+        .target = HandleBits(framebuffer),
+        .width = extent.width,
+        .height = extent.height,
+        .samples = static_cast<u32>(key.samples),
+        .color_attachments = colors,
+        .depth_stencil = key.depth_format != VideoCore::Surface::PixelFormat::Invalid,
+        .color_clear_mask = key.color_clear_mask,
+        .depth_stencil_clear = key.depth_stencil_clear,
+        .color_discard_mask = key.color_discard_mask,
+        .depth_stencil_discard = key.depth_stencil_discard,
+        .resolve = key.resolve_color || key.resolve_depth_stencil,
+    };
+    auto& profiler = Common::Diagnostics::RenderPasses::Global();
+    if (profiler.Begin(info, Common::Diagnostics::HostFrameId())) {
+        profiler.Describe(info, DescribeRenderPass(key));
+    }
+}
+
+} // Anonymous namespace
 
 void Scheduler::CommandChunk::ExecuteAll(vk::CommandBuffer cmdbuf,
                                          vk::CommandBuffer upload_cmdbuf) {
@@ -102,10 +169,14 @@ void Scheduler::DispatchWork() {
 }
 
 void Scheduler::BeginRenderPassImpl(const Framebuffer* framebuffer, VkRenderPass renderpass,
-                                    const VkClearValue* clear_values, u32 clear_value_count) {
+                                    const RenderPassKey& key, const VkClearValue* clear_values,
+                                    u32 clear_value_count) {
     Common::Diagnostics::Increment(Common::Diagnostics::Counter::RenderPasses);
     const VkFramebuffer framebuffer_handle = framebuffer->Handle();
     const VkExtent2D render_area = framebuffer->RenderArea();
+    if (Common::Diagnostics::IsCapturing()) {
+        ProfileRenderPass(renderpass, framebuffer_handle, render_area, key);
+    }
     state.renderpass = renderpass;
     state.framebuffer = framebuffer_handle;
     state.render_area = render_area;
@@ -169,8 +240,13 @@ void Scheduler::RealizeDeferredClear() {
         dc.depth_stencil && dc.framebuffer->DiscardsMsaaDepthStencil();
     const VkRenderPass renderpass = dc.framebuffer->RenderPassVariant(
         dc.color_clear_mask, dc.depth_stencil, color_discard_mask, depth_stencil_discard);
-    EndRenderPass();
-    BeginRenderPassImpl(dc.framebuffer, renderpass, clear_values.data(), count);
+    RenderPassKey key = base;
+    key.color_clear_mask = dc.color_clear_mask;
+    key.depth_stencil_clear = dc.depth_stencil;
+    key.color_discard_mask = color_discard_mask;
+    key.depth_stencil_discard = depth_stencil_discard;
+    EndRenderPass(RenderPassEnd::DeferredClear);
+    BeginRenderPassImpl(dc.framebuffer, renderpass, key, clear_values.data(), count);
 }
 
 bool Scheduler::DeferColorClear(const Framebuffer* framebuffer, u32 rt_slot,
@@ -180,7 +256,7 @@ bool Scheduler::DeferColorClear(const Framebuffer* framebuffer, u32 rt_slot,
     }
     if (deferred_clear.framebuffer != nullptr && deferred_clear.framebuffer != framebuffer) {
         RealizeDeferredClear();
-        EndRenderPass();
+        EndRenderPass(RenderPassEnd::DeferredClear);
     }
     deferred_clear.framebuffer = framebuffer;
     deferred_clear.color_clear_mask |= 1u << rt_slot;
@@ -194,7 +270,7 @@ bool Scheduler::DeferDepthStencilClear(const Framebuffer* framebuffer, const VkC
     }
     if (deferred_clear.framebuffer != nullptr && deferred_clear.framebuffer != framebuffer) {
         RealizeDeferredClear();
-        EndRenderPass();
+        EndRenderPass(RenderPassEnd::DeferredClear);
     }
     deferred_clear.framebuffer = framebuffer;
     deferred_clear.depth_stencil = true;
@@ -207,7 +283,7 @@ void Scheduler::FlushDeferredClear() {
         return;
     }
     RealizeDeferredClear();
-    EndRenderPass();
+    EndRenderPass(RenderPassEnd::DeferredClear);
 }
 
 void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
@@ -224,12 +300,12 @@ void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
         return;
     }
     // Ends any active pass and realizes a deferred clear
-    EndRenderPass();
-    BeginRenderPassImpl(framebuffer, renderpass, nullptr, 0);
+    EndRenderPass(RenderPassEnd::NextTarget);
+    BeginRenderPassImpl(framebuffer, renderpass, framebuffer->RenderPassKeyBase(), nullptr, 0);
 }
 
 void Scheduler::RequestOutsideRenderPassOperationContext() {
-    EndRenderPass();
+    EndRenderPass(RenderPassEnd::OutsideOperation);
 }
 
 bool Scheduler::UpdateGraphicsPipeline(GraphicsPipeline* pipeline) {
@@ -416,15 +492,16 @@ void Scheduler::InvalidateState() {
 
 void Scheduler::EndPendingOperations() {
     query_cache->CounterReset(VideoCommon::QueryType::ZPassPixelCount64);
-    EndRenderPass();
+    EndRenderPass(RenderPassEnd::Submit);
 }
 
-void Scheduler::EndRenderPass()
+void Scheduler::EndRenderPass(RenderPassEnd reason)
     {
         RealizeDeferredClear();
         if (!state.renderpass) {
             return;
         }
+        Common::Diagnostics::RenderPasses::Global().End(reason);
 
         query_cache->CounterClose(VideoCommon::QueryType::StreamingByteCount);
 

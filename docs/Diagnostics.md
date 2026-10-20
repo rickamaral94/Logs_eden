@@ -70,12 +70,13 @@ the bundle.
 | --- | --- |
 | `report.json` | Structured report, `schema_version` 2 |
 | `manifest.json` | Size and SHA-256 of every file, completeness flags, sample gaps, log and event coverage |
-| `summary.txt` | Human readable summary of `report.json` |
+| `summary.txt` | Human readable summary of `report.json`, driver evaluation first |
+| `driver_evaluation.json` | Driver-centric digest, same as `report.driver_evaluation` (see below) |
 | `README.txt` | Short description of the files |
 | `samples.jsonl` | Raw samples (paths redacted) |
 | `events.jsonl` | Events (fully redacted, includes user notes) |
 | `native/native_critical_*.json` | Native state written on fatal errors |
-| `logs/eden_log.txt` | Eden log lines of this capture, preceded by up to 64 KiB of labelled context; optional, see `log_coverage` |
+| `logs/eden_log.txt` | Eden log lines of this capture, preceded by up to 64 KiB of labelled context; runs of lines that differ only in their timestamp are collapsed into `#diag: previous line repeated N more times`; optional, see `log_coverage` |
 | `logs/eden_gpu.log` | GPU logger output, optional, if present |
 | `advanced/gpu_crashes/*` | GPU logger state dumps, opt-in only |
 
@@ -105,6 +106,12 @@ directory of device bundles to also run the device-bundle regression tests).
   count-based metrics are recomputed from the windows after the cut (FPS, share of frames over
   20 ms, mean frame GPU time), because window percentiles cannot be merged. Segmenting by
   markers is not automated yet; use separate captures per scene or `--warmup-s`.
+- `eden_diag.py driver BUNDLE... [--json]` prints the driver digest of each bundle side by side:
+  driver identity and mapped driver library build-id, `TU_DEBUG`, frame GPU time percentiles,
+  kgsl clock and busy, render pass figures, pipeline creation and driver cache hit rate, driver
+  message categories, extensions Eden removed, session end, and the Pearson correlation between
+  per-window GPU time and passes per frame (a correlation, not a cause). Older bundles show
+  `n/a` where a value was not recorded.
 
 ## Session integrity (schema 2)
 
@@ -220,6 +227,50 @@ reason.
   change the pipeline; the size of the driver cache file alone does not prove hits.
 - Not instrumented yet: Maxwell command processing and descriptor preparation timers, scheduler
   queue depth, flush reasons, triangle/index counts, barriers and layout transitions.
+
+## Render passes (driver workload shape)
+
+Tile-based drivers (Turnip in GMEM mode) load and store every attachment per render pass, so the
+number and shape of passes explain much of their per-frame cost. The scheduler records, only
+while capturing, every render pass it begins and ends (`common/diagnostics_render_passes`):
+
+- `render_passes` in each sample (`samples[].native`) and in `native_summary`: `passes`,
+  `empty_passes` (no draw), `clear_only_passes` (no draw, at least one clear),
+  `draws_in_passes`, `draws_per_pass_avg`/`max`, `draws_per_pass_histogram` (`0`, `1`, `2_4`,
+  `5_16`, `17_64`, `65_plus`), `msaa_passes`, `resolve_passes`, `pixels` and `sample_pixels`
+  (render area, times samples), `attachment_loads`/`clears`/`stores`/`discards` (from Eden's
+  render pass key: LOAD unless cleared, STORE unless discarded), `same_target_reopen` (a pass on
+  the framebuffer the previous pass used) and `same_target_reopen_after` the reason that ended
+  the previous pass, `ended_by` (`next_target`, `outside_operation` for copies, blits,
+  dispatches, queries and barriers, `submit`, `deferred_clear`, `other`), `frames`,
+  `passes_per_frame_avg`, `pixels_per_frame_avg` and `passes_per_frame` percentiles. Frames are
+  host frames (the id used by GPU time); the frame in progress at a window end is counted in
+  the next window.
+- `native_summary.render_passes.shapes`: up to 128 distinct (render pass, extent) shapes per
+  capture, the 24 most frequent with a description (`c0=A8B8G8R8_UNORM(load,store)
+  ds=D24_UNORM_S8_UINT(clear,discard) x4 resolve`), passes, empty passes, draws, pixels,
+  reopens and end reasons. Passes of shapes beyond the limit are counted in `untracked_passes`.
+- Cost: one mutex per pass end (about 100 per frame in the device captures) and a counter per
+  draw; nothing outside a capture.
+
+## Driver evaluation
+
+`report.driver_evaluation` (also `driver_evaluation.json`, and first in `summary.txt`) gathers,
+from the rest of the report, what a driver developer needs: `driver` (Vulkan identity, mapped
+driver libraries with build-id, selected package, `driver_environment`, SoC, kernel and the Eden
+settings that affect the driver path), `workload` per host frame, `render_passes` (session
+figures plus derived percentages), `gpu` (frame/submit GPU time, kgsl clock, limit and busy,
+fence waits by reason), `pipelines` (creation timers, runtime misses, creation feedback driver
+cache hit rate, slow and failed creations with pipeline hash), `driver_messages` (driver tags of
+the logcat digest by category: `lrz`, `ubwc`, `sysmem`, `gmem`, `binning`, `resolve`,
+`blit_copy_clear`, `shader`, `sync_flush`, `memory`, `other`; other tags counted apart),
+`eden_workarounds` (extensions Eden removed, effective paths, feature flags) and `errors`
+(session end, `device_fault`, error and critical events).
+
+`observations` are measured facts with their evidence (thresholds: 10 % empty or reopened
+passes, at least one attachment load per pass, clock average under 80 % of the limit, any slow
+pipeline creation, any driver message, device loss). `hypotheses` are kept apart and each names
+the A/B test that would confirm it; none is a conclusion.
 
 ## Driver identity and effective Vulkan paths
 
@@ -434,3 +485,4 @@ confirmed or revised with five AB/BA pairs per level on the reference device.
 | 2 | `cache_sync` wait reason split into `texture_download`, `buffer_download`, `buffer_write_sync`; frame series gain `skipped_across_pause`; `emulation/paused` and `emulation/resumed` events |
 | 2 (additive) | `vulkan/turbo_mode` event (setting on/off, active) at renderer start |
 | 2 (additive) | `driver_environment`, `driver_log` and `logs/driver_logcat.txt` |
+| 2 (additive) | `render_passes` (samples and native summary), `render_passes` in `hitches`, `driver_evaluation` and `driver_evaluation.json`, `log_coverage.collapsed_repeated_lines`; repeated log lines collapsed in `logs/eden_log.txt` (`log_digest` still counts every occurrence) |

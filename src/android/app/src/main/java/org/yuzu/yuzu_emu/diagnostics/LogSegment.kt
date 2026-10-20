@@ -36,6 +36,8 @@ object LogSegmentExtractor {
     private const val MAX_EXAMPLE_CHARS = 240
 
     private val TIMESTAMP = Regex("^\\[\\s*(\\d+\\.\\d+)]")
+    private const val REPEAT_PREFIX = "#diag: previous line repeated "
+    private const val REPEAT_SUFFIX = " more times"
     private val LEVEL_CLASS = Regex("^\\[[^]]*]\\s+(\\S+)\\s+<(\\w+)>")
 
     /** Recognizable log patterns. Counting them is classification, not diagnosis. */
@@ -141,7 +143,8 @@ object LogSegmentExtractor {
             readRange(source.file, contextFrom, captureStart),
             contextFrom > 0
         )
-        var capture = readRange(source.file, captureStart, captureEnd)
+        val collapsed = collapseRepeats(readRange(source.file, captureStart, captureEnd))
+        var capture = collapsed.first
         var omittedBytes = 0L
         val captureBudget = (maxBytes - context.length).coerceAtLeast(maxBytes / 2)
         if (capture.length > captureBudget) {
@@ -188,6 +191,7 @@ object LogSegmentExtractor {
             put("capture_stop_byte", stop?.second)
             put("bytes_after_stop", after.length)
             put("omitted_bytes", omittedBytes)
+            put("collapsed_repeated_lines", collapsed.second)
             put("capture_start_found", start != null)
             put("capture_stop_found", stop != null)
             put("source_ends_mid_line", endsMidLine)
@@ -205,6 +209,40 @@ object LogSegmentExtractor {
         return LogSegment(text, coverage, digest)
     }
 
+    /**
+     * Replaces runs of lines that only differ in their timestamp with the first line and a
+     * "#diag: previous line repeated N more times" marker. Returns the text and N in total.
+     */
+    internal fun collapseRepeats(text: String): Pair<String, Long> {
+        val out = StringBuilder(text.length)
+        var previousKey: String? = null
+        var repeats = 0L
+        var removed = 0L
+        fun flush() {
+            if (repeats > 0) {
+                out.append(REPEAT_PREFIX).append(repeats).append(REPEAT_SUFFIX).append('\n')
+                removed += repeats
+                repeats = 0
+            }
+        }
+        val lines = text.split('\n')
+        lines.forEachIndexed { index, line ->
+            val last = index == lines.lastIndex
+            if (last && line.isEmpty()) return@forEachIndexed
+            val key = if (line.startsWith("#diag:")) null else TIMESTAMP.replace(line, "")
+            if (key != null && key == previousKey) {
+                repeats++
+                return@forEachIndexed
+            }
+            flush()
+            previousKey = key
+            out.append(line)
+            if (!last) out.append('\n')
+        }
+        flush()
+        return out.toString() to removed
+    }
+
     /** Counts per level, per log class and per known pattern, with a few example lines. */
     internal fun digest(text: String): JsonObject {
         val levels = sortedMapOf<String, Int>()
@@ -213,16 +251,23 @@ object LogSegmentExtractor {
         val patternFirst = mutableMapOf<String, Double?>()
         val examples = mutableMapOf<String, MutableList<String>>()
         var lines = 0
-        text.lineSequence().forEach { line ->
-            if (line.isBlank() || line.startsWith("#diag:")) return@forEach
-            lines++
+        var previous: String? = null
+        text.lineSequence().forEach { raw ->
+            if (raw.isBlank()) return@forEach
+            // A collapsed run counts as many times as it occurred.
+            val weight = repeatCount(raw)
+            val line = if (weight != null) previous ?: return@forEach else raw
+            if (weight == null && line.startsWith("#diag:")) return@forEach
+            previous = line
+            val count = weight?.toInt() ?: 1
+            lines += count
             LEVEL_CLASS.find(line)?.let {
-                classes.merge(it.groupValues[1], 1, Int::plus)
-                levels.merge(it.groupValues[2], 1, Int::plus)
+                classes.merge(it.groupValues[1], count, Int::plus)
+                levels.merge(it.groupValues[2], count, Int::plus)
             }
             for ((name, pattern) in PATTERNS) {
                 if (!pattern.containsMatchIn(line)) continue
-                if (patternCounts.merge(name, 1, Int::plus) == 1) {
+                if (patternCounts.merge(name, count, Int::plus) == count && weight == null) {
                     patternFirst[name] = TIMESTAMP.find(line)?.groupValues?.get(1)?.toDoubleOrNull()
                 }
                 val list = examples.getOrPut(name) { mutableListOf() }
@@ -260,6 +305,13 @@ object LogSegmentExtractor {
             )
         }
     }
+
+    private fun repeatCount(line: String): Long? =
+        if (line.startsWith(REPEAT_PREFIX) && line.endsWith(REPEAT_SUFFIX)) {
+            line.substring(REPEAT_PREFIX.length, line.length - REPEAT_SUFFIX.length).toLongOrNull()
+        } else {
+            null
+        }
 
     private fun readRange(file: File, from: Long, to: Long): String {
         if (to <= from) return ""

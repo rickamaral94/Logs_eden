@@ -16,6 +16,7 @@
 #include "common/assert.h"
 #include "common/logging.h"
 #include "common/scope_exit.h"
+#include "common/diagnostics_render_passes.h"
 #include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -261,6 +262,7 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     if (is_indexed) {
         Common::Diagnostics::Increment(Common::Diagnostics::Counter::IndexedDrawCalls);
     }
+    Common::Diagnostics::RenderPasses::Global().NoteDraw();
     draw_func();
 }
 

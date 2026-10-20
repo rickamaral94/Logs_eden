@@ -7,6 +7,7 @@
   validate BUNDLE...          integrity, coverage and privacy checks of each bundle
   compare A B                 differences between two bundles (compare_reports.py)
   abba --a A... --b B...      repeated A/B (or AB/BA) runs: comparability and per-run medians
+  driver BUNDLE...            driver evaluation digest of each bundle, side by side
 
 Bundles are read only. Nothing here attributes causes: comparisons list differences,
 blockers that make a comparison invalid and caveats that weaken it.
@@ -352,6 +353,122 @@ def abba(runs, variable, warmup_s=0.0):
     return "\n".join(out) + "\n", bool(blockers)
 
 
+# ---------------------------------------------------------------------------------------------
+# driver
+
+
+def _pct(part, whole):
+    if part is None or not whole:
+        return None
+    return part * 100.0 / whole
+
+
+def _pearson(xs, ys):
+    if len(xs) < 5:
+        return None
+    mx, my = statistics.fmean(xs), statistics.fmean(ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    if not sxx or not syy:
+        return None
+    return sxy / (sxx * syy) ** 0.5
+
+
+def _driver_library(libraries):
+    """The mapped Vulkan driver itself (Turnip first), not the loader hooks or GL libraries."""
+    names = [(str(lib.get("path", "")).rsplit("/", 1)[-1], lib) for lib in libraries]
+    for pattern in (r"freedreno|turnip", r"^vulkan\.|^libvulkan_"):
+        for name, lib in names:
+            if re.search(pattern, name):
+                return f"{name} build-id {str(lib.get('elf_build_id'))[:16]}"
+    return None
+
+
+def driver_digest(bundle):
+    """Driver-centric metrics of one bundle. Uses driver_evaluation when the bundle has it and
+    falls back to the report sections it was built from, so older bundles still compare."""
+    report = bundle.report
+    evaluation = report.get("driver_evaluation") or {}
+    device = get(report, "vulkan", "device", default={}) or {}
+    summary = report.get("native_summary") or {}
+    passes = summary.get("render_passes") or {}
+    count = passes.get("passes")
+    android = report.get("android_summary") or {}
+    counters = summary.get("counters") or {}
+    timers = summary.get("timers") or {}
+    libraries = get(report, "graphics_driver", "loaded", "libraries", default=[]) or []
+    events = get(report, "events", "native", default=[]) or []
+    messages = get(evaluation, "driver_messages", "by_category", default={}) or {}
+    env = report.get("driver_environment") or {}
+
+    # Per-window GPU time against the render pass count, both per host frame.
+    gpu_ms, passes_per_frame = [], []
+    for sample in bundle.samples():
+        native = sample.get("native") or {}
+        mean = get(native, "gpu_timing", "frame_gpu", "mean_ms")
+        per_frame = get(native, "render_passes", "passes_per_frame_avg")
+        if mean is not None and per_frame is not None:
+            gpu_ms.append(mean)
+            passes_per_frame.append(per_frame)
+
+    return {
+        "driver": f"{get(device, 'driver', 'id')} {get(device, 'driver', 'info')}",
+        "driver_version_raw": device.get("driver_version_raw"),
+        "driver_library": _driver_library(libraries),
+        "tu_debug": env.get("TU_DEBUG") if isinstance(env, dict) else None,
+        "game": get(report, "game", "frontend", "program_id"),
+        "frame_gpu_p50_ms": get(report, "gpu_timing", "session", "frame_gpu", "p50_ms"),
+        "frame_gpu_p90_ms": get(report, "gpu_timing", "session", "frame_gpu", "p90_ms"),
+        "frame_gpu_p99_ms": get(report, "gpu_timing", "session", "frame_gpu", "p99_ms"),
+        "gpu_clock_avg_mhz": get(android, "gpu_clock_mhz_kgsl", "avg"),
+        "gpu_clock_limit_mhz": get(android, "gpu_max_clock_mhz_kgsl", "max"),
+        "gpu_busy_avg_pct": get(android, "gpu_busy_pct_kgsl", "avg"),
+        "passes_per_frame": passes.get("passes_per_frame_avg"),
+        "draws_per_pass": passes.get("draws_per_pass_avg"),
+        "empty_pass_pct": _pct(passes.get("empty_passes"), count),
+        "same_target_reopen_pct": _pct(passes.get("same_target_reopen"), count),
+        "attachment_loads_per_pass": (passes.get("attachment_loads") / count
+                                      if count and passes.get("attachment_loads") is not None
+                                      else None),
+        "msaa_pass_pct": _pct(passes.get("msaa_passes"), count),
+        "pipeline_create_max_ms": (get(timers, "graphics_pipeline_create", "max_us") or 0) / 1000
+        if get(timers, "graphics_pipeline_create", "max_us") is not None else None,
+        "slow_pipeline_creates": sum(1 for e in events
+                                     if str(e.get("name", "")).startswith("slow_")),
+        "driver_cache_hit_pct": _pct(counters.get("driver_pipeline_cache_hits"),
+                                     counters.get("pipeline_feedback_valid")),
+        "driver_messages": ", ".join(f"{k}={int(v.get('count', 0))}"
+                                     for k, v in sorted(messages.items())) or None,
+        "removed_extensions": ",".join(str(e.get("extension"))
+                                       for e in device.get("extensions_removed_by_eden") or [])
+        or None,
+        "timeline_semaphore": get(device, "effective_paths", "timeline_semaphore"),
+        "end": get(report, "session_end", "classification"),
+        "gpu_ms_vs_passes_r": _pearson(passes_per_frame, gpu_ms),
+        "observations": [o.get("text") for o in evaluation.get("observations") or []],
+        "hypotheses": [h.get("text") for h in evaluation.get("hypotheses") or []],
+    }
+
+
+def driver_report(bundles):
+    digests = [(os.path.basename(b.path), driver_digest(b)) for b in bundles]
+    out = ["Driver evaluation digest (measured values; r is a correlation, not a cause)", ""]
+    keys = [k for k in digests[0][1] if k not in ("observations", "hypotheses")]
+    width = max(len(k) for k in keys)
+    for index, (name, _) in enumerate(digests):
+        out.append(f"[{index}] {name}")
+    out.append("")
+    for key in keys:
+        values = [fmt(d[key]) for _, d in digests]
+        out.append(f"{key:<{width}}  " + "  |  ".join(f"[{i}] {v}" for i, v in enumerate(values)))
+    for index, (_, digest) in enumerate(digests):
+        for kind in ("observations", "hypotheses"):
+            for text in digest[kind]:
+                out.append(f"[{index}] {kind[:-1]}: {text}")
+    return "\n".join(out) + "\n"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -367,6 +484,9 @@ def main(argv=None):
                    help="what is meant to differ between A and B (default: driver)")
     r.add_argument("--warmup-s", type=float, default=0.0,
                    help="ignore sample windows before this many seconds")
+    d = sub.add_parser("driver", help="driver evaluation digest of each bundle, side by side")
+    d.add_argument("bundles", nargs="+")
+    d.add_argument("--json", action="store_true", help="print the digests as JSON")
     args = parser.parse_args(argv)
 
     if args.command == "validate":
@@ -381,6 +501,14 @@ def main(argv=None):
             if any(level == "error" for level, _ in findings):
                 status = 1
         return status
+    if args.command == "driver":
+        bundles = [Bundle(p) for p in args.bundles]
+        if args.json:
+            json.dump({b.path: driver_digest(b) for b in bundles}, sys.stdout, indent=2)
+            sys.stdout.write("\n")
+        else:
+            sys.stdout.write(driver_report(bundles))
+        return 0
     if args.command == "compare":
         sys.stdout.write(compare_reports.compare(Bundle(args.a).report, Bundle(args.b).report))
         return 0

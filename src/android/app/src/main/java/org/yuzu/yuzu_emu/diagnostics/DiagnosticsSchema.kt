@@ -28,6 +28,7 @@ object DiagnosticsSchema {
     const val MANIFEST_FILE = "manifest.json"
     const val DRIVER_LOG_FILE = "driver_logcat.txt"
     const val DRIVER_LOG_DIGEST_FILE = "driver_logcat_digest.json"
+    const val DRIVER_EVALUATION_FILE = "driver_evaluation.json"
 
     const val STATE_ACTIVE = "active"
     const val STATE_COMPLETED = "completed"

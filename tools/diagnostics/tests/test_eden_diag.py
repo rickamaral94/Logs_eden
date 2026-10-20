@@ -166,6 +166,48 @@ class AbbaTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["frame_gpu_mean_ms"], 9.0)
 
 
+class DriverTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_digest_reads_render_passes_and_driver_messages(self):
+        rep = report()
+        rep["native_summary"]["render_passes"] = {
+            "passes": 200, "empty_passes": 50, "same_target_reopen": 20,
+            "attachment_loads": 300, "passes_per_frame_avg": 100.0, "draws_per_pass_avg": 4.0}
+        rep["graphics_driver"] = {"loaded": {"libraries": [
+            {"path": "/x/libmain_hook.so", "elf_build_id": "aaaa"},
+            {"path": "/x/libvulkan_freedreno.so", "elf_build_id": "5e768be5e6931a89967a"}]}}
+        rep["driver_evaluation"] = {
+            "driver_messages": {"by_category": {"lrz": {"count": 12}}},
+            "observations": [{"text": "25.0% of render passes contain no draw"}],
+            "hypotheses": [{"text": "governor"}]}
+        samples = [{"native": {"gpu_timing": {"frame_gpu": {"mean_ms": 10.0 + i}},
+                               "render_passes": {"passes_per_frame_avg": 90.0 + 2 * i}}}
+                   for i in range(6)]
+        path = write_bundle(self.tmp.name, "d.zip", rep, {
+            "samples.jsonl": "\n".join(json.dumps(s) for s in samples).encode()})
+        digest = eden_diag.driver_digest(eden_diag.Bundle(path))
+        self.assertEqual(digest["empty_pass_pct"], 25.0)
+        self.assertEqual(digest["attachment_loads_per_pass"], 1.5)
+        self.assertEqual(digest["driver_library"],
+                         "libvulkan_freedreno.so build-id 5e768be5e6931a89")
+        self.assertEqual(digest["driver_messages"], "lrz=12")
+        self.assertAlmostEqual(digest["gpu_ms_vs_passes_r"], 1.0)
+        text = eden_diag.driver_report([eden_diag.Bundle(path)])
+        self.assertIn("[0] observation: 25.0% of render passes contain no draw", text)
+
+    def test_old_bundles_report_missing_values(self):
+        path = write_bundle(self.tmp.name, "o.zip", report())
+        digest = eden_diag.driver_digest(eden_diag.Bundle(path))
+        self.assertIsNone(digest["passes_per_frame"])
+        self.assertIsNone(digest["gpu_ms_vs_passes_r"])
+        self.assertEqual(digest["frame_gpu_p50_ms"], 10.0)
+
+
 def digest(path):
     with open(path, "rb") as handle:
         return hashlib.sha256(handle.read()).hexdigest()

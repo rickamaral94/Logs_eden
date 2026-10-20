@@ -39,6 +39,7 @@ jobs:
           g++ -std=c++20 -Wall -Wextra -Werror -fsanitize=address,undefined -I. \
             common/session_diagnostics.cpp common/diagnostics_gpu_timing.cpp \
             tests/common/session_diagnostics.cpp tests/common/diagnostics_gpu_timing.cpp \
+            common/diagnostics_render_passes.cpp tests/common/diagnostics_render_passes.cpp \
             -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_asan"
           "$RUNNER_TEMP/sd_asan"
 
@@ -48,6 +49,7 @@ jobs:
           g++ -std=c++20 -O1 -fsanitize=thread -I. \
             common/session_diagnostics.cpp common/diagnostics_gpu_timing.cpp \
             tests/common/session_diagnostics.cpp tests/common/diagnostics_gpu_timing.cpp \
+            common/diagnostics_render_passes.cpp tests/common/diagnostics_render_passes.cpp \
             -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_tsan"
           "$RUNNER_TEMP/sd_tsan"
 

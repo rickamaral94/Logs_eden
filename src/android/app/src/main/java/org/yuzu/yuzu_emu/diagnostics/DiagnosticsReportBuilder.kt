@@ -266,8 +266,14 @@ class DiagnosticsReportBuilder(
         }
 
         val redactedReport = redactStructured(report).asObject()!!
-        val summary = summaryText(redactedReport, samples.size, markers.size)
+        val evaluation = DriverEvaluation.build(redactedReport)
+        val summary = summaryText(redactedReport, evaluation, samples.size, markers.size)
 
+        entries += BundleEntry(
+            DiagnosticsSchema.DRIVER_EVALUATION_FILE,
+            "Driver evaluation: workload shape, GPU time, pipelines, driver messages",
+            pretty.encodeToString(JsonElement.serializer(), evaluation).toByteArray()
+        )
         if (samples.isNotEmpty()) {
             entries += BundleEntry(
                 DiagnosticsSchema.SAMPLES_FILE,
@@ -340,6 +346,7 @@ class DiagnosticsReportBuilder(
         }
         val finalReport = JsonObject(
             redactedReport + mapOf(
+                "driver_evaluation" to evaluation,
                 "contents" to contents,
                 "privacy" to privacySection()
             )
@@ -703,6 +710,7 @@ class DiagnosticsReportBuilder(
                     native["gpu_timing"]?.asObject()?.get("frame_gpu")?.asObject().num("max_ms")
                 )
                 put("queue_submit_max_ms", timerMaxMs("queue_submit"))
+                put("render_passes", native["render_passes"]?.asObject().num("passes"))
                 put("graphics_pipeline_create_max_ms", timerMaxMs("graphics_pipeline_create"))
                 put("compute_pipeline_create_max_ms", timerMaxMs("compute_pipeline_create"))
                 put("graphics_pipeline_cache_miss", counters.num("graphics_pipeline_cache_miss"))
@@ -1068,7 +1076,12 @@ class DiagnosticsReportBuilder(
         return JsonObject(result.mapValues { JsonPrimitive(it.value) })
     }
 
-    private fun summaryText(report: JsonObject, sampleCount: Int, markerCount: Int): String {
+    private fun summaryText(
+        report: JsonObject,
+        evaluation: JsonObject,
+        sampleCount: Int,
+        markerCount: Int
+    ): String {
         val session = report["session"]?.asObject()
         val device = report["device"]?.asObject()
         val identity = device?.get("identity")?.asObject()
@@ -1098,6 +1111,9 @@ class DiagnosticsReportBuilder(
         return buildString {
             appendLine("Eden diagnostic report (schema ${DiagnosticsSchema.SCHEMA_VERSION})")
             appendLine("Generated: ${report.str("generated_at_utc")}")
+            appendLine()
+            appendLine("== Driver evaluation (details in driver_evaluation.json) ==")
+            DriverEvaluation.summaryLines(evaluation).forEach { appendLine(it) }
             appendLine()
             appendLine("== Session ==")
             appendLine("State: ${session.str("state")}  End reason: ${session.str("end_reason")}")
@@ -1421,7 +1437,9 @@ class DiagnosticsReportBuilder(
         Eden diagnostic bundle
 
         report.json   Structured report. "schema_version" identifies the format.
-        summary.txt   Human readable summary of report.json.
+        summary.txt   Human readable summary of report.json, driver evaluation first.
+        driver_evaluation.json  Driver-centric digest: render passes, GPU time, pipelines,
+                      driver messages, Eden workarounds, observations and hypotheses.
         samples.jsonl One JSON object per sample: native metrics ("native") and Android metrics ("android").
         events.jsonl  Capture lifecycle, user markers and Android system events.
         native/       Native state written on fatal errors such as Vulkan device loss.
