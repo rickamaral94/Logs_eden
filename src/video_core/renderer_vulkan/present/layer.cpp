@@ -106,7 +106,7 @@ void Layer::ConfigureDraw(const Device& device, PresentPushConstants* out_push_c
 #endif
 
     // Finish any pending renderpass
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     {
         const Common::Diagnostics::ScopedWaitReason reason{
             Common::Diagnostics::WaitReason::PresentResources};

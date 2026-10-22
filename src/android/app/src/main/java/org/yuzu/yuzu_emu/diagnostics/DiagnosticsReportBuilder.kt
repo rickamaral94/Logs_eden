@@ -136,6 +136,14 @@ class DiagnosticsReportBuilder(
         }
 
         val markers = events.filter { it.str("type") == "user_marker" }
+        // Scene names are user text: redacted like marker notes.
+        val sceneMarkers = events.filter { it.str("type") == "scene_marker" }.map {
+            JsonObject(it + ("name" to JsonPrimitive(redactor.redactText(it.str("name")))))
+        }
+        val framesFile = dir?.let { File(it, DiagnosticsSchema.FRAMES_FILE) }
+        val frameTable = framesFile?.takeIf { it.isFile }
+            ?.useLines { SceneAnalysis.readFrames(it) }
+            ?: SceneAnalysis.FrameTable(emptyList(), emptyList())
         val androidEvents = events.filter { it.str("type") != "user_marker" }
 
         val entries = mutableListOf<BundleEntry>()
@@ -259,13 +267,30 @@ class DiagnosticsReportBuilder(
             )
             put("exit_reasons", linkedExits)
             put("driver_log", driverLogSection(dir))
+            put("scene_markers", JsonArray(sceneMarkers))
+            put("scenes", SceneAnalysis.analyze(sceneMarkers, frameTable, captureSamples))
+            put(
+                "frame_log",
+                buildJsonObject {
+                    put("native", nativeSummary.asObject()?.get("frame_log") ?: JsonNull)
+                    put("file", meta?.get("frames") ?: JsonNull)
+                    put("rows_in_file", frameTable.rows.size)
+                    put(
+                        "note",
+                        "one record per host frame: differences of existing counters, timers " +
+                            "and the render pass profile between two host frame ends, with GPU " +
+                            "time joined from the timestamp queries; no extra Vulkan work"
+                    )
+                }
+            )
             put("log_coverage", logSegment.coverage)
             put("log_digest", logSegment.digest)
             put("availability", availability(samples))
             put("metric_definitions", staticStart?.get("metric_definitions") ?: JsonNull)
         }
 
-        val redactedReport = redactStructured(report).asObject()!!
+        val withKey = JsonObject(report + ("comparison_key" to comparisonKey(report)))
+        val redactedReport = redactStructured(withKey).asObject()!!
         val evaluation = DriverEvaluation.build(redactedReport)
         val summary = summaryText(redactedReport, evaluation, samples.size, markers.size)
 
@@ -274,6 +299,13 @@ class DiagnosticsReportBuilder(
             "Driver evaluation: workload shape, GPU time, pipelines, driver messages",
             pretty.encodeToString(JsonElement.serializer(), evaluation).toByteArray()
         )
+        framesFile?.takeIf { it.isFile && it.length() > 0 }?.let {
+            entries += BundleEntry(
+                DiagnosticsSchema.FRAMES_FILE,
+                "Per host frame records (columns + rows per drain); see report frame_log",
+                it.readBytes()
+            )
+        }
         if (samples.isNotEmpty()) {
             entries += BundleEntry(
                 DiagnosticsSchema.SAMPLES_FILE,
@@ -1115,6 +1147,10 @@ class DiagnosticsReportBuilder(
             appendLine("== Driver evaluation (details in driver_evaluation.json) ==")
             DriverEvaluation.summaryLines(evaluation).forEach { appendLine(it) }
             appendLine()
+            appendLine("== Scenes (per host frame, see scenes in report.json) ==")
+            SceneAnalysis.summaryLines(report["scenes"] as? JsonArray ?: JsonArray(emptyList()))
+                .forEach { appendLine(it) }
+            appendLine()
             appendLine("== Session ==")
             appendLine("State: ${session.str("state")}  End reason: ${session.str("end_reason")}")
             appendLine("Started: ${session.str("started_at_utc")}  Duration: $duration")
@@ -1433,6 +1469,61 @@ class DiagnosticsReportBuilder(
         }
     }
 
+    /**
+     * What must match between runs for an AB/BA comparison of the same scene: APK, effective
+     * settings, driver package and the loaded driver ELF, shader cache state, resolution, game.
+     */
+    private fun comparisonKey(report: JsonObject): JsonObject {
+        val app = report["app"]?.asObject()
+        val vkDevice = report["vulkan"]?.asObject()?.get("device")?.asObject()
+        val swapchain = report["vulkan"]?.asObject()?.get("swapchain")?.asObject()
+        val hashes = report["configuration_hashes"]?.asObject()
+        val graphics = report["graphics_driver"]?.asObject()
+        val libraries = (graphics?.get("loaded")?.asObject()?.get("libraries") as? JsonArray)
+            .orEmpty().mapNotNull { it.asObject() }
+        val driverLibrary = libraries.firstOrNull {
+            DRIVER_ELF.containsMatchIn(it.str("path").substringAfterLast('/'))
+        }
+        val settings = (report["settings"] as? JsonArray).orEmpty().mapNotNull { it.asObject() }
+        fun setting(name: String) = settings.firstOrNull { it.str("name") == name }?.get("value")
+        return buildJsonObject {
+            put("apk_version_name", app?.get("version_name") ?: JsonNull)
+            put("apk_version_code", app?.get("version_code") ?: JsonNull)
+            put("apk_build_native", app?.get("build_version_native") ?: JsonNull)
+            put("eden_revision", report["build"]?.asObject()?.get("revision") ?: JsonNull)
+            put("effective_settings_sha256", hashes?.get("effective_settings_sha256") ?: JsonNull)
+            put("per_game_settings_sha256", hashes?.get("per_game_settings_sha256") ?: JsonNull)
+            put("driver_package", graphics?.get("selected") ?: JsonNull)
+            put("driver_elf", driverLibrary?.str("path")?.substringAfterLast('/'))
+            put("driver_elf_sha256", driverLibrary?.get("sha256") ?: JsonNull)
+            put("driver_elf_build_id", driverLibrary?.get("elf_build_id") ?: JsonNull)
+            put("vulkan_driver_info", vkDevice?.get("driver")?.asObject()?.get("info") ?: JsonNull)
+            put("driver_environment", report["driver_environment"] ?: JsonNull)
+            put("shader_cache_state", hashes?.get("shader_cache_state") ?: JsonNull)
+            put("resolution_setup", setting("resolution_setup") ?: JsonNull)
+            put("swapchain_width", swapchain?.get("width") ?: JsonNull)
+            put("swapchain_height", swapchain?.get("height") ?: JsonNull)
+            put("present_mode", swapchain?.get("present_mode") ?: JsonNull)
+            put("force_max_clock", setting("renderer_force_max_clock") ?: JsonNull)
+            put(
+                "game_program_id",
+                report["game"]?.asObject()?.get("frontend")?.asObject()?.get("program_id")
+                    ?: JsonNull
+            )
+            put("game_build_id", hashes?.get("game_build_id") ?: JsonNull)
+            put("capture_level", report["session"]?.asObject()?.get("level") ?: JsonNull)
+            put(
+                "gpu_timestamps_enabled",
+                report["session"]?.asObject()?.get("gpu_timestamps_enabled") ?: JsonNull
+            )
+            put(
+                "note",
+                "the loaded driver ELF is identified by SHA-256 and GNU build-id of the mapped " +
+                    "file (null when the app cannot read it)"
+            )
+        }
+    }
+
     private fun readme(): String = """
         Eden diagnostic bundle
 
@@ -1441,7 +1532,8 @@ class DiagnosticsReportBuilder(
         driver_evaluation.json  Driver-centric digest: render passes, GPU time, pipelines,
                       driver messages, Eden workarounds, observations and hypotheses.
         samples.jsonl One JSON object per sample: native metrics ("native") and Android metrics ("android").
-        events.jsonl  Capture lifecycle, user markers and Android system events.
+        events.jsonl  Capture lifecycle, user and scene markers and Android system events.
+        frames.jsonl  One record per host frame (render pass ends, reopens, draws, waits, GPU time).
         native/       Native state written on fatal errors such as Vulkan device loss.
         logs/         Eden logs, if included.
         advanced/     Optional GPU logger dumps, only when explicitly selected.
@@ -1462,6 +1554,8 @@ class DiagnosticsReportBuilder(
         }
         else -> element
     }
+
+    private val DRIVER_ELF = Regex("(?i)freedreno|turnip|^vulkan\\.|^libvulkan_")
 
     private fun fileJson(name: String, description: String, size: Long?) = buildJsonObject {
         put("name", name)

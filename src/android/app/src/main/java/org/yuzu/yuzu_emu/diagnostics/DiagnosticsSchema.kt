@@ -18,6 +18,7 @@ object DiagnosticsSchema {
     const val SESSION_FILE = "session.json"
     const val SAMPLES_FILE = "samples.jsonl"
     const val EVENTS_FILE = "events.jsonl"
+    const val FRAMES_FILE = "frames.jsonl"
     const val STATIC_START_FILE = "static_start.json"
     const val STATIC_END_FILE = "static_end.json"
     const val CRITICAL_PREFIX = "native_critical_"

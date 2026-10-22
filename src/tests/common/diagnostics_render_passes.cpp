@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <set>
+#include <string_view>
+
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
@@ -48,7 +51,7 @@ TEST_CASE("RenderPasses: passes, attachments, reopen and shapes", "[common]") {
     for (int i = 0; i < 3; ++i) {
         profiler.NoteDraw();
     }
-    profiler.End(EndReason::OutsideOperation);
+    profiler.End(EndReason::Copy);
     REQUIRE_FALSE(profiler.Begin(Pass(1, 10), 1)); // shape already known
     profiler.NoteDraw();
     profiler.End(EndReason::NextTarget);
@@ -72,7 +75,8 @@ TEST_CASE("RenderPasses: passes, attachments, reopen and shapes", "[common]") {
     REQUIRE(window["attachment_clears"] == 2);
     REQUIRE(window["attachment_stores"] == 12);
     REQUIRE(window["same_target_reopen"] == 1);
-    REQUIRE(window["same_target_reopen_after"]["outside_operation"] == 1);
+    REQUIRE(window["same_target_reopen_after"]["copy"] == 1);
+    REQUIRE(window["same_target_reopen_after"]["unknown"] == 0);
     REQUIRE(window["ended_by"]["submit"] == 2);
     REQUIRE(window["frames"] == 1);
     REQUIRE(window["passes_per_frame"]["max"] == 3);
@@ -104,6 +108,43 @@ TEST_CASE("RenderPasses: shape table is bounded", "[common]") {
     REQUIRE(session["shapes"]["distinct"] == Profiler::MaxShapes);
     REQUIRE(session["shapes"]["untracked_passes"] == 10);
     REQUIRE(session["shapes"]["top"].size() == Profiler::TopShapes);
+}
+
+TEST_CASE("RenderPasses: every end reason has a distinct name and totals keep them", "[common]") {
+    std::set<std::string_view> names;
+    for (size_t i = 0; i < EndReasonCount; ++i) {
+        names.insert(EndReasonName(static_cast<EndReason>(i)));
+    }
+    REQUIRE(names.size() == EndReasonCount);
+    REQUIRE(EndReasonName(EndReason::Readback) == "readback");
+    REQUIRE(EndReasonName(EndReason::Unknown) == "unknown");
+
+    Profiler profiler;
+    // A dispatch and a readback split passes on target 1; a pass begun while another is open
+    // is closed as unknown, never attributed to a guessed operation.
+    profiler.Begin(Pass(1, 1), 1);
+    profiler.NoteDraw();
+    profiler.End(EndReason::Dispatch);
+    profiler.Begin(Pass(1, 1), 1);
+    profiler.End(EndReason::Readback);
+    profiler.Begin(Pass(1, 1), 1);
+    profiler.Begin(Pass(2, 2), 1);
+    profiler.End(EndReason::Submit);
+
+    const Totals totals = profiler.SessionTotals();
+    REQUIRE(totals.passes == 4);
+    REQUIRE(totals.draws == 1);
+    REQUIRE(totals.empty == 3);
+    REQUIRE(totals.ended_by[static_cast<size_t>(EndReason::Dispatch)] == 1);
+    REQUIRE(totals.ended_by[static_cast<size_t>(EndReason::Readback)] == 1);
+    REQUIRE(totals.ended_by[static_cast<size_t>(EndReason::Unknown)] == 1);
+    REQUIRE(totals.same_target_reopen == 2);
+    REQUIRE(totals.reopen_after[static_cast<size_t>(EndReason::Dispatch)] == 1);
+    REQUIRE(totals.reopen_after[static_cast<size_t>(EndReason::Readback)] == 1);
+
+    const json session = json::parse(profiler.SessionJson());
+    REQUIRE(session["ended_by"].size() == EndReasonCount); // zero reasons are kept
+    REQUIRE(session["ended_by"]["unknown"] == 1);
 }
 
 TEST_CASE("RenderPasses: a draw outside a pass is not counted", "[common]") {

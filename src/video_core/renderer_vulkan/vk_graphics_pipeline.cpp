@@ -528,7 +528,7 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
     }
 
     if (regs.transform_feedback_enabled != 0) {
-        scheduler.RequestOutsideRenderPassOperationContext();
+        scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::TransformFeedback);
     }
 
     buffer_cache.UpdateGraphicsBuffers(is_indexed);

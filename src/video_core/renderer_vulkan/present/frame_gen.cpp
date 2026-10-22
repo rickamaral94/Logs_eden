@@ -239,7 +239,7 @@ void FrameGen::Process(const Device& device, Frame* frame, VkFormat format,
     warm_streak = warm ? warm_streak + 1 : 0;
     generated = warm && warm_streak >= LSFG_RECURRENCE_FRAMES && plan.generations > 0;
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     scheduler.Record([this, source = *frame->image, extent, count,
                       dispatch = warm](vk::CommandBuffer cmdbuf) {
         CopyPresentedFrame(cmdbuf, source, chain->Input(count), extent);
@@ -276,7 +276,7 @@ void FrameGen::GenerateInto(const Device& device, Frame* destination, size_t gen
 
     const VkExtent2D extent{.width = destination->width, .height = destination->height};
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     scheduler.Record([this, count = last_count, generation_count = last_generations, generation,
                       target = destination->index, image = *destination->image,
                       extent](vk::CommandBuffer cmdbuf) {
@@ -315,7 +315,7 @@ void FrameGen::DumpDebugImages(u64 count) {
 
         vk::Buffer buffer = CreateWrappedBuffer(memory_allocator, size, MemoryUsage::Download);
 
-        scheduler.RequestOutsideRenderPassOperationContext();
+        scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
         scheduler.Record(
             [handle = image.Handle(), dst = *buffer, extent](vk::CommandBuffer cmdbuf) {
                 DownloadColorImage(

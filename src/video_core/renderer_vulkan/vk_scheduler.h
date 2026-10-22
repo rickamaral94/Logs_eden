@@ -40,6 +40,8 @@ class StateTracker;
 struct QueryCacheParams;
 struct RenderPassKey;
 
+using RenderPassEnd = Common::Diagnostics::RenderPasses::EndReason;
+
 /// The scheduler abstracts command buffer and fence management with an interface that's able to do
 /// OpenGL-like operations on Vulkan command buffers.
 class Scheduler {
@@ -73,8 +75,8 @@ public:
     void FlushDeferredClear();
 
     /// Requests the current execution context to be able to execute operations only allowed outside
-    /// of a renderpass.
-    void RequestOutsideRenderPassOperationContext();
+    /// of a renderpass. The reason classifies the render pass end in the diagnostics profile.
+    void RequestOutsideRenderPassOperationContext(RenderPassEnd reason = RenderPassEnd::Unknown);
 
     /// Returns true when a render pass is currently active in the scheduler state.
     bool IsRenderPassActive() const {
@@ -298,8 +300,7 @@ private:
 
     void EndPendingOperations();
 
-    void EndRenderPass(Common::Diagnostics::RenderPasses::EndReason reason =
-                           Common::Diagnostics::RenderPasses::EndReason::Other);
+    void EndRenderPass(RenderPassEnd reason = RenderPassEnd::Unknown);
 
     void AcquireNewChunk();
 

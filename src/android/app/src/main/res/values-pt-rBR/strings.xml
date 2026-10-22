@@ -951,6 +951,13 @@
     <string name="diagnostics_marker_category">O que você viu?</string>
     <string name="diagnostics_marker_note">Descreva o problema (opcional)</string>
     <string name="diagnostics_marker_saved">Problema marcado</string>
+    <string name="diagnostics_scene_start">Iniciar cena de teste</string>
+    <string name="diagnostics_scene_end">Encerrar cena de teste</string>
+    <string name="diagnostics_scene_name_hint">Nome da cena (opcional)</string>
+    <string name="diagnostics_scene_none">Marque o início e o fim da mesma cena em cada rodada para compará-las.</string>
+    <string name="diagnostics_scene_open">Cena em andamento: %1$s</string>
+    <string name="diagnostics_scene_started">Cena iniciada</string>
+    <string name="diagnostics_scene_ended">Cena encerrada</string>
     <string name="diagnostics_start_failed">Não foi possível iniciar a captura: %1$s</string>
     <string name="diagnostics_review_export">Revisar e exportar</string>
     <string name="diagnostics_include_eden_log">Incluir log do Eden (últimos 4 MiB)</string>

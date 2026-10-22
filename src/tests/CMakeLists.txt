@@ -8,6 +8,7 @@ add_executable(tests
     common/bit_field.cpp
     common/cityhash.cpp
     common/container_hash.cpp
+    common/diagnostics_frame_log.cpp
     common/diagnostics_gpu_timing.cpp
     common/diagnostics_render_passes.cpp
     common/fibers.cpp

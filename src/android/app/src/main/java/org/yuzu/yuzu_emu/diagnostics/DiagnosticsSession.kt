@@ -29,6 +29,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -59,7 +60,9 @@ sealed class CaptureState {
         val sessionId: String,
         val startedUptimeMs: Long,
         val level: CaptureLevel,
-        val markers: Int
+        val markers: Int,
+        val openScene: String? = null,
+        val scenes: Int = 0
     ) : CaptureState()
 }
 
@@ -83,6 +86,7 @@ data class SessionInfo(
 object DiagnosticsSession {
     private const val MIN_FREE_BYTES = 64L * 1024L * 1024L
     private const val MAX_SAMPLES_BYTES = 16L * 1024L * 1024L
+    private const val LOGCAT_TAG = "EdenDiag"
 
     private val json = Json { prettyPrint = false }
     private val pretty = Json { prettyPrint = true }
@@ -96,6 +100,11 @@ object DiagnosticsSession {
     private var samplingJob: Job? = null
     private var sampler: AndroidMetricsSampler? = null
     private var driverLog: DriverLogCollector? = null
+
+    @Volatile
+    private var frameWriter: FrameFileWriter? = null
+    private var sceneCount = 0L
+    private var openScene: Pair<Long, String>? = null
 
     @Volatile
     private var sessionDir: File? = null
@@ -224,10 +233,13 @@ object DiagnosticsSession {
 
         sessionDir = dir
         sessionMeta = startedMeta
+        frameWriter = FrameFileWriter(File(dir, DiagnosticsSchema.FRAMES_FILE), id)
         appContext = app
         startedUptimeMs = SystemClock.uptimeMillis()
         markerCount = 0
         sampleCount = 0
+        sceneCount = 0
+        openScene = null
         registerSystemCallbacks(app)
         _state.value = CaptureState.Capturing(id, startedUptimeMs, options.level, 0)
         appendEvent(
@@ -288,9 +300,64 @@ object DiagnosticsSession {
         markerId
     }
 
+    /**
+     * Starts a named test scene, or ends the open one. Scene markers carry the native monotonic
+     * time and host frame id, so the report can select the whole frames between them. Returns
+     * the marker event, or null when idle or when there is no scene to end.
+     */
+    fun markScene(start: Boolean, name: String = ""): JsonObject? = synchronized(lock) {
+        val current = _state.value as? CaptureState.Capturing ?: return null
+        if (start && openScene != null) {
+            sceneMarker(false, "next_scene_started")
+        }
+        val event = if (start) {
+            sceneCount++
+            openScene = sceneCount to name.trim().ifEmpty { "scene $sceneCount" }.take(80)
+            sceneMarker(true, "user")
+        } else {
+            sceneMarker(false, "user") ?: return null
+        }
+        _state.value = current.copy(
+            openScene = openScene?.second,
+            scenes = sceneCount.toInt()
+        )
+        event
+    }
+
+    // Called with lock held.
+    private fun sceneMarker(start: Boolean, reason: String): JsonObject? {
+        val (id, name) = openScene ?: return null
+        val kind = if (start) "scene_start" else "scene_end"
+        val position = parseNative(
+            runCatching { NativeDiagnostics.markScene(kind, name, id) }.getOrDefault("{}")
+        ) as? JsonObject ?: JsonObject(emptyMap())
+        val event = JsonObject(
+            buildJsonObject {
+                put("type", "scene_marker")
+                put("kind", kind)
+                put("scene_id", id)
+                put("name", name)
+                put("reason", reason)
+                put("wall_ms", System.currentTimeMillis())
+            } + position
+        )
+        appendEvent(event)
+        // In the Eden log and in this process' logcat, next to the driver's own messages.
+        Log.info("[Diagnostics] Scene $id $kind ($name) frame ${position["host_frame_id"]}")
+        android.util.Log.i(
+            LOGCAT_TAG,
+            "$kind id=$id frame=${position["host_frame_id"]} mono_ms=${position["mono_ms"]}"
+        )
+        if (!start) {
+            openScene = null
+        }
+        return event
+    }
+
     fun stop(reason: String = "user") {
         synchronized(lock) {
             val dir = sessionDir ?: return
+            sceneMarker(false, "capture_stopped")
             samplingJob?.cancel()
             samplingJob = null
             appContext?.let { unregisterSystemCallbacks(it) }
@@ -305,6 +372,17 @@ object DiagnosticsSession {
             }
             driverLog = null
             runCatching { NativeDiagnostics.stopCapture() }
+            // Frames still waiting for GPU results are written without them.
+            synchronized(sampleLock) {
+                runCatching {
+                    frameWriter?.append(
+                        NativeDiagnostics.takeFrames(true),
+                        SystemClock.uptimeMillis()
+                    )
+                }
+            }
+            val frames = frameWriter?.status()
+            frameWriter = null
             appendEvent(
                 buildJsonObject {
                     put("type", "capture_stopped")
@@ -345,7 +423,9 @@ object DiagnosticsSession {
                         "duration_ms" to JsonPrimitive(endUptime - startedUptimeMs),
                         "end_reason" to JsonPrimitive(reason),
                         "samples" to JsonPrimitive(sampleCount),
-                        "markers" to JsonPrimitive(markerCount)
+                        "frames" to (frames ?: JsonNull),
+                        "markers" to JsonPrimitive(markerCount),
+                        "scenes" to JsonPrimitive(sceneCount)
                     )
                 )
                 runCatching {
@@ -420,6 +500,9 @@ object DiagnosticsSession {
     private fun writeSample(sampler: AndroidMetricsSampler): String? = synchronized(sampleLock) {
         val dir = sessionDir ?: return null
         val native = parseNative(runCatching { NativeDiagnostics.takeSample() }.getOrDefault("{}"))
+        runCatching {
+            frameWriter?.append(NativeDiagnostics.takeFrames(false), SystemClock.uptimeMillis())
+        }.onFailure { Log.error("[Diagnostics] Failed to write frames: ${it.message}") }
         val android = runCatching { sampler.sample() }.getOrElse { errorJson(it) }
         val line = buildJsonObject {
             put("capture_id", dir.name)

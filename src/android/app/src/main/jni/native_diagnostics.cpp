@@ -263,6 +263,11 @@ jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_takeSample(JNIEnv*
     return SafeJson(env, [] { return Diag::TakeSampleJson(); });
 }
 
+jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_takeFrames(JNIEnv* env, jobject obj,
+                                                                         jboolean all) {
+    return SafeJson(env, [all] { return Diag::TakeFramesJson(all != JNI_FALSE); });
+}
+
 jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_sessionSummary(JNIEnv* env,
                                                                              jobject obj) {
     return SafeJson(env, [] { return Diag::SessionSummaryJson(); });
@@ -270,6 +275,17 @@ jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_sessionSummary(JNI
 
 jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_staticInfo(JNIEnv* env, jobject obj) {
     return SafeJson(env, [] { return StaticInfoJson().dump(); });
+}
+
+jstring Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_markScene(JNIEnv* env, jobject obj,
+                                                                        jstring j_kind,
+                                                                        jstring j_name,
+                                                                        jlong j_scene_id) {
+    const std::string kind = Common::Android::GetJString(env, j_kind);
+    const std::string name = Common::Android::GetJString(env, j_name);
+    return SafeJson(env, [&] {
+        return Diag::MarkScene(kind, name, static_cast<u64>(j_scene_id));
+    });
 }
 
 void Java_org_yuzu_yuzu_1emu_diagnostics_NativeDiagnostics_recordMarker(JNIEnv* env, jobject obj,

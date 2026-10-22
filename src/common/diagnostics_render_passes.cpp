@@ -15,8 +15,10 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr std::array<std::string_view, static_cast<size_t>(EndReason::Count)> END_NAMES{
-    "next_target", "outside_operation", "submit", "deferred_clear", "other",
+constexpr std::array<std::string_view, EndReasonCount> END_NAMES{
+    "next_target", "submit",  "clear",   "copy",  "readback",
+    "blit",        "dispatch", "eden_compute", "query", "barrier",
+    "transform_feedback", "present", "sync", "other", "unknown",
 };
 constexpr std::array<std::string_view, Profiler::DrawBuckets> DRAW_BUCKET_NAMES{
     "0", "1", "2_4", "5_16", "17_64", "65_plus",
@@ -26,9 +28,7 @@ template <size_t N>
 json ByReason(const std::array<u64, N>& values) {
     json out = json::object();
     for (size_t i = 0; i < N; ++i) {
-        if (values[i] != 0) {
-            out[std::string{END_NAMES[i]}] = values[i];
-        }
+        out[std::string{END_NAMES[i]}] = values[i];
     }
     return out;
 }
@@ -87,7 +87,7 @@ void Profiler::Reset() {
 
 bool Profiler::Begin(const PassInfo& info, u64 frame_id) {
     if (active) {
-        End(EndReason::Other);
+        End(EndReason::Unknown);
     }
     active = true;
     current = info;
@@ -327,6 +327,18 @@ std::string Profiler::SessionJson() const {
         {"top", std::move(top)},
     };
     return out.dump();
+}
+
+Totals Profiler::SessionTotals() const {
+    std::scoped_lock lock{mutex};
+    return Totals{
+        .passes = session.passes,
+        .empty = session.empty,
+        .draws = session.draws,
+        .same_target_reopen = session.same_target_reopen,
+        .ended_by = session.ended_by,
+        .reopen_after = session.reopen_after,
+    };
 }
 
 Profiler& Global() {

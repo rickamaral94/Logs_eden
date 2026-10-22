@@ -20,6 +20,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+private const val sessionIdValue = "20260101-000000-0001"
+
 class DiagnosticsReportBuilderTest {
     private lateinit var root: File
     private lateinit var session: File
@@ -83,8 +85,29 @@ class DiagnosticsReportBuilderTest {
         File(session, DiagnosticsSchema.SAMPLES_FILE).writeText(samples + "\n{\"t_ms\":80")
         File(session, DiagnosticsSchema.EVENTS_FILE).writeText(
             """{"t_ms":0,"type":"capture_started"}
+            {"t_ms":1500,"type":"scene_marker","kind":"scene_start","scene_id":1,"name":"bridge /sdcard/x","reason":"user","mono_ms":2500,"wall_ms":1767225602500,"host_frame_id":40,"capture_seq":2,"capturing":true}
             {"t_ms":4100,"type":"user_marker","marker_id":42,"category":"flicker","note":"see 192.168.0.2 /sdcard/x"}
+            {"t_ms":4500,"type":"scene_marker","kind":"scene_end","scene_id":1,"name":"bridge /sdcard/x","reason":"user","mono_ms":5500,"wall_ms":1767225605500,"host_frame_id":160,"capture_seq":2,"capturing":true}
             """.trimIndent() + "\n"
+        )
+        // 200 host frames of 25 ms from mono 1000 ms; every 10th is slow with readback splits.
+        val frameColumns = listOf(
+            "frame", "end_mono_us", "interval_us", "across_pause", "game_frames", "draws",
+            "passes", "reopens", "end_next_target", "end_readback", "reopen_after_readback",
+            "pipelines_created", "fence_wait_us", "gpu_us", "gpu_state"
+        )
+        val frameRows = (0 until 200).joinToString(",") { id ->
+            val slow = id % 10 == 0
+            listOf(
+                id, 1_000_000 + id * 25_000, if (slow) 60_000 else 25_000, if (id == 0) 1 else 0,
+                1, 450, 120, 41, 79, if (slow) 12 else 2, if (slow) 12 else 2, 0, 4000,
+                if (slow) 30_000 else 12_000, 1
+            ).joinToString(",", "[", "]")
+        }
+        File(session, DiagnosticsSchema.FRAMES_FILE).writeText(
+            "{\"capture_id\":\"$sessionIdValue\",\"mono_ms\":6000,\"frames\":{\"columns\":" +
+                frameColumns.joinToString(",", "[", "]") { "\"$it\"" } +
+                ",\"row_count\":200,\"rows\":[$frameRows]}}\n"
         )
     }
 
@@ -93,7 +116,7 @@ class DiagnosticsReportBuilderTest {
         root.deleteRecursively()
     }
 
-    private val sessionId = "20260101-000000-0001"
+    private val sessionId = sessionIdValue
 
     private fun build(options: ExportOptions = ExportOptions()): BundlePlan {
         val log = File(root, "eden_log.txt").apply {
@@ -267,6 +290,67 @@ class DiagnosticsReportBuilderTest {
             )
         }
         assertFalse(File(root, "exports/bundle.zip.partial").exists())
+    }
+
+    @Test
+    fun scenesSelectMarkedFramesAndRedactTheirNames() {
+        val plan = build()
+        val scene = plan.report["scenes"]!!.jsonArray.single().jsonObject
+        assertEquals("119", scene["frames_used"]!!.jsonPrimitive.content)
+        assertFalse(scene["name"]!!.jsonPrimitive.content.contains("/sdcard"))
+        val readback = scene["render_pass_ends"]!!.jsonObject["readback"]!!.jsonObject
+        assertEquals("348", readback["total"]!!.jsonPrimitive.content)
+        val slow = scene["slow_frames"]!!.jsonObject
+        assertEquals("11", slow["slow"]!!.jsonPrimitive.content)
+        assertEquals(2, plan.report["scene_markers"]!!.jsonArray.size)
+        assertTrue(plan.summary.contains("Scene 1 \""))
+        assertTrue(plan.summary.contains("readback 2.9 (reopen 2.9)"))
+        assertEquals(
+            "200",
+            plan.report["frame_log"]!!.jsonObject["rows_in_file"]!!.jsonPrimitive.content
+        )
+    }
+
+    @Test
+    fun comparisonKeyNamesWhatMustMatchBetweenRuns() {
+        val key = build().report["comparison_key"]!!.jsonObject
+        assertEquals("test", key["apk_version_name"]!!.jsonPrimitive.content)
+        assertEquals("2", key["resolution_setup"]!!.jsonPrimitive.content)
+        assertEquals(64, key["effective_settings_sha256"]!!.jsonPrimitive.content.length)
+        assertTrue(key.containsKey("driver_elf_sha256"))
+        assertTrue(key.containsKey("shader_cache_state"))
+    }
+
+    @Test
+    fun zipEntriesMatchTheManifest() {
+        val plan = build()
+        val destination = File(root, "exports/integrity.zip")
+        assertTrue(DiagnosticsBundleWriter.write(plan, destination) is BundleResult.Success)
+        ZipFile(destination).use { zip ->
+            val manifest = Json.parseToJsonElement(
+                zip.getInputStream(zip.getEntry(DiagnosticsSchema.MANIFEST_FILE))
+                    .reader().readText()
+            ).jsonObject
+            val listed = manifest["files"]!!.jsonArray.map { it.jsonObject }
+            assertTrue(
+                listed.any { it["name"]!!.jsonPrimitive.content == DiagnosticsSchema.FRAMES_FILE }
+            )
+            listed.forEach { file ->
+                val name = file["name"]!!.jsonPrimitive.content
+                // Reading the whole entry also checks its CRC.
+                val bytes = zip.getInputStream(zip.getEntry(name)).readBytes()
+                assertEquals(name, file["bytes"]!!.jsonPrimitive.content.toInt(), bytes.size)
+                val sha = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+                    .joinToString("") { "%02x".format(it) }
+                assertEquals(name, file["sha256"]!!.jsonPrimitive.content, sha)
+            }
+            val names = zip.entries().toList().map { it.name }
+            assertEquals(names.size, names.toSet().size)
+            assertEquals(
+                File(session, DiagnosticsSchema.FRAMES_FILE).readText(),
+                zip.getInputStream(zip.getEntry(DiagnosticsSchema.FRAMES_FILE)).reader().readText()
+            )
+        }
     }
 
     @Test

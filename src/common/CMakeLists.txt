@@ -42,6 +42,8 @@ add_library(
     demangle.h
     device_power_state.cpp
     device_power_state.h
+    diagnostics_frame_log.cpp
+    diagnostics_frame_log.h
     diagnostics_gpu_timing.cpp
     diagnostics_gpu_timing.h
     diagnostics_render_passes.cpp

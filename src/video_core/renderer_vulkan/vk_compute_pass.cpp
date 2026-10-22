@@ -294,7 +294,7 @@ std::pair<VkBuffer, VkDeviceSize> Uint8Pass::Assemble(u32 num_vertices, VkBuffer
     compute_pass_descriptor_queue.AddBuffer(staging.buffer, staging.offset, staging_size);
     const void* const descriptor_data{compute_pass_descriptor_queue.UpdateData()};
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::EdenCompute);
     scheduler.Record([this, descriptor_data, num_vertices](vk::CommandBuffer cmdbuf) {
         static constexpr u32 DISPATCH_SIZE = 1024;
         static constexpr VkMemoryBarrier WRITE_BARRIER{
@@ -352,7 +352,7 @@ std::pair<VkBuffer, VkDeviceSize> QuadIndexedPass::Assemble(
     compute_pass_descriptor_queue.AddBuffer(staging.buffer, staging.offset, staging_size);
     const void* const descriptor_data{compute_pass_descriptor_queue.UpdateData()};
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::EdenCompute);
     scheduler.Record([this, descriptor_data, num_tri_vertices, base_vertex, index_shift,
                       is_strip](vk::CommandBuffer cmdbuf) {
         static constexpr u32 DISPATCH_SIZE = 1024;
@@ -397,7 +397,7 @@ void ConditionalRenderingResolvePass::Resolve(VkBuffer dst_buffer, VkBuffer src_
     compute_pass_descriptor_queue.AddBuffer(dst_buffer, 0, sizeof(u32));
     const void* const descriptor_data{compute_pass_descriptor_queue.UpdateData()};
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Query);
     scheduler.Record([this, descriptor_data, compare_to_zero](vk::CommandBuffer cmdbuf) {
         static constexpr VkMemoryBarrier read_barrier{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -469,7 +469,7 @@ void QueriesPrefixScanPass::Run(VkBuffer accumulation_buffer, VkBuffer dst_buffe
         size_t used_offset = offset;
         offset += runs_to_do;
 
-        scheduler.RequestOutsideRenderPassOperationContext();
+        scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Query);
         scheduler.Record([this, descriptor_data, min_accumulation_limit, max_accumulation_limit,
                           runs_to_do, used_offset, conditional_access](vk::CommandBuffer cmdbuf) {
             static constexpr VkMemoryBarrier read_barrier{
@@ -526,7 +526,7 @@ void ASTCDecoderPass::Assemble(Image& image, const StagingBufferRef& map,
         VideoCore::Surface::DefaultBlockWidth(image.info.format),
         VideoCore::Surface::DefaultBlockHeight(image.info.format),
     };
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::EdenCompute);
     const VkPipeline vk_pipeline = *pipeline;
     const VkImageAspectFlags aspect_mask = image.AspectMask();
     const VkImage vk_image = image.Handle();
@@ -718,7 +718,7 @@ void BlockLinearUnswizzle3DPass::Unswizzle(
     const u32 blocks_x = (image.info.size.width  + 3) / 4;
     const u32 blocks_y = (image.info.size.height + 3) / 4;
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::EdenCompute);
     for (u32 z_offset = 0; z_offset < z_count; z_offset += MAX_BATCH_SLICES) {
         const u32 current_chunk_slices = (std::min)(MAX_BATCH_SLICES, z_count - z_offset);
         const u32 current_z_start = z_start + z_offset;

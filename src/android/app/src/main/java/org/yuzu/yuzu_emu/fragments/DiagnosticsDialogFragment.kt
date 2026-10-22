@@ -51,6 +51,7 @@ class DiagnosticsDialogFragment : DialogFragment() {
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { toggleCapture() }
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { showMarkerDialog() }
+            binding.buttonScene.setOnClickListener { toggleScene() }
             render(DiagnosticsSession.state.value)
         }
 
@@ -79,6 +80,7 @@ class DiagnosticsDialogFragment : DialogFragment() {
             is CaptureState.Idle -> {
                 currentBinding.textStatus.text = getString(R.string.diagnostics_status_idle)
                 currentBinding.groupStartOptions.visibility = View.VISIBLE
+                currentBinding.groupScene.visibility = View.GONE
                 dialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.setText(R.string.diagnostics_start)
                 dialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.visibility = View.GONE
             }
@@ -91,6 +93,22 @@ class DiagnosticsDialogFragment : DialogFragment() {
                     state.markers
                 )
                 currentBinding.groupStartOptions.visibility = View.GONE
+                currentBinding.groupScene.visibility = View.VISIBLE
+                val scene = state.openScene
+                currentBinding.textSceneStatus.text = if (scene != null) {
+                    getString(R.string.diagnostics_scene_open, scene)
+                } else {
+                    getString(R.string.diagnostics_scene_none)
+                }
+                currentBinding.layoutSceneName.visibility =
+                    if (scene == null) View.VISIBLE else View.GONE
+                currentBinding.buttonScene.setText(
+                    if (scene == null) {
+                        R.string.diagnostics_scene_start
+                    } else {
+                        R.string.diagnostics_scene_end
+                    }
+                )
                 dialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.setText(R.string.diagnostics_stop)
                 dialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.visibility = View.VISIBLE
             }
@@ -128,6 +146,25 @@ class DiagnosticsDialogFragment : DialogFragment() {
                     Toast.LENGTH_LONG
                 ).show()
             }
+        }
+    }
+
+    /**
+     * Starts or ends the test scene. The dialog is dismissed first so the marker lands on
+     * gameplay frames, not on frames rendered behind the dialog.
+     */
+    private fun toggleScene() {
+        val state = DiagnosticsSession.state.value as? CaptureState.Capturing ?: return
+        val start = state.openScene == null
+        val name = binding.editSceneName.text?.toString().orEmpty()
+        val context = requireContext().applicationContext
+        dismissAllowingStateLoss()
+        if (DiagnosticsSession.markScene(start, name) != null) {
+            Toast.makeText(
+                context,
+                if (start) R.string.diagnostics_scene_started else R.string.diagnostics_scene_ended,
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 

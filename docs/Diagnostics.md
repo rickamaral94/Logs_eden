@@ -74,7 +74,8 @@ the bundle.
 | `driver_evaluation.json` | Driver-centric digest, same as `report.driver_evaluation` (see below) |
 | `README.txt` | Short description of the files |
 | `samples.jsonl` | Raw samples (paths redacted) |
-| `events.jsonl` | Events (fully redacted, includes user notes) |
+| `events.jsonl` | Events (fully redacted, includes user notes and scene markers) |
+| `frames.jsonl` | Per host frame records (see "Scenes and per host frame records") |
 | `native/native_critical_*.json` | Native state written on fatal errors |
 | `logs/eden_log.txt` | Eden log lines of this capture, preceded by up to 64 KiB of labelled context; runs of lines that differ only in their timestamp are collapsed into `#diag: previous line repeated N more times`; optional, see `log_coverage` |
 | `logs/eden_gpu.log` | GPU logger output, optional, if present |
@@ -106,6 +107,16 @@ directory of device bundles to also run the device-bundle regression tests).
   count-based metrics are recomputed from the windows after the cut (FPS, share of frames over
   20 ms, mean frame GPU time), because window percentiles cannot be merged. Segmenting by
   markers is not automated yet; use separate captures per scene or `--warmup-s`.
+- `eden_diag.py abba ... --scene NAME` compares the marked scene with that name instead of the
+  whole capture: host and game FPS, frame interval and GPU time percentiles, GPU coverage,
+  share of slow frames, passes, reopens, draws, pipelines and fence wait per frame, and every
+  render pass end reason with its reopens per frame. A run without the scene is a blocker;
+  thermal status above 0 during the scene, GPU coverage under 90 % and scene frame counts that
+  differ by more than 25 % are caveats. The identity check now also compares the loaded driver
+  ELF (SHA-256 or build-id; part of the `driver` variable), the APK (part of `build`),
+  `resolution_setup` and the driver environment variables.
+- `validate` also checks `frames.jsonl` (frame id gaps, end times in frame order, frames before
+  the capture), the frame log limits, scene coverage notes and end markers without a start.
 - `eden_diag.py driver BUNDLE... [--json]` prints the driver digest of each bundle side by side:
   driver identity and mapped driver library build-id, `TU_DEBUG`, frame GPU time percentiles,
   kgsl clock and busy, render pass figures, pipeline creation and driver cache hit rate, driver
@@ -241,8 +252,8 @@ while capturing, every render pass it begins and ends (`common/diagnostics_rende
   (render area, times samples), `attachment_loads`/`clears`/`stores`/`discards` (from Eden's
   render pass key: LOAD unless cleared, STORE unless discarded), `same_target_reopen` (a pass on
   the framebuffer the previous pass used) and `same_target_reopen_after` the reason that ended
-  the previous pass, `ended_by` (`next_target`, `outside_operation` for copies, blits,
-  dispatches, queries and barriers, `submit`, `deferred_clear`, `other`), `frames`,
+  the previous pass, `ended_by` (reasons below; every reason is always listed, zero included),
+  `frames`,
   `passes_per_frame_avg`, `pixels_per_frame_avg` and `passes_per_frame` percentiles. Frames are
   host frames (the id used by GPU time); the frame in progress at a window end is counted in
   the next window.
@@ -252,6 +263,91 @@ while capturing, every render pass it begins and ends (`common/diagnostics_rende
   reopens and end reasons. Passes of shapes beyond the limit are counted in `untracked_passes`.
 - Cost: one mutex per pass end (about 100 per frame in the device captures) and a counter per
   draw; nothing outside a capture.
+
+### Why a render pass ended
+
+Every code path that needs to run outside a render pass passes its class to
+`Scheduler::RequestOutsideRenderPassOperationContext`; the scheduler's own paths pass theirs to
+`EndRenderPass`. A call without a class is counted as `unknown`, so a new or missed call site
+shows up instead of being folded into a guess. The class names the operation that forced the
+end; it says nothing about its cost.
+
+| Reason | Call sites |
+| --- | --- |
+| `next_target` | `RequestRenderpass` with another framebuffer, render pass or extent |
+| `submit` | command buffer flush or finish (`EndPendingOperations`) |
+| `clear` | a deferred clear realized as its own pass; `ClearBuffer` |
+| `copy` | buffer copies and their barriers, image copies (also MSAA), uploads, reinterpretation |
+| `readback` | `Image::DownloadMemory` (GPU to host image downloads) |
+| `blit` | `BlitImage`, `BlitScale`, blit helper color blits and MSAA copies |
+| `dispatch` | guest compute (`RasterizerVulkan::DispatchCompute`) |
+| `eden_compute` | Eden helper compute: index conversion (uint8, quads), ASTC decode, 3D unswizzle |
+| `query` | query cache resets, copies, resolves, prefix scan, conditional rendering resolve |
+| `barrier` | `FragmentBarrier`, feedback loop barrier, layout transition, shader read barrier |
+| `transform_feedback` | graphics pipeline setup with transform feedback |
+| `present` | composition, post-processing, upscaling, frame generation, applet capture |
+| `sync` | `WaitForIdle` |
+| `other` | buffer views and the null buffer |
+| `unknown` | no class given (a pass begun while another was open is also closed as unknown) |
+
+Buffer downloads (buffer cache readbacks) go through a scheduler finish, so they appear as
+`submit` plus `buffer_download` fence waits rather than as `readback`.
+
+## Scenes and per host frame records
+
+Totals over a capture cannot say which operation split which pass in a slow frame. Two
+additions give the same scene in every run a per frame view:
+
+- **Scene markers.** While capturing, the in-game diagnostics dialog offers **Start test scene**
+  and **End test scene** (optional name). The dialog closes before the marker is taken.
+  Each marker is a `scene_marker` line in `events.jsonl` and a native `scene/scene_start` or
+  `scene/scene_end` event, with `scene_id`, `name` (redacted like notes), `mono_ms` and
+  `mono_us` (CLOCK_MONOTONIC, the clock of samples, events and frame records), `wall_ms` (to
+  match logcat's epoch times), `host_frame_id` (the frame in progress), `capture_seq` and
+  `capturing`. An `EdenDiag` logcat line is written as well, so `logs/driver_logcat.txt` shows
+  the marker next to the driver's own messages. Starting a scene ends an open one
+  (`reason: next_scene_started`); stopping the capture ends it (`capture_stopped`). The report
+  lists them in `scene_markers`.
+- **Frame records** (`frames.jsonl`, `common/diagnostics_frame_log`). At every host frame end
+  (`RendererVulkan::Composite`) the capture totals that already exist are read and the
+  difference to the previous frame end is queued: game frames, draws (all, indexed, indirect),
+  render passes, empty passes, reopens, `end_<reason>` and `reopen_after_<reason>` for every
+  reason above, submits, dispatches, staging upload/download bytes, pipelines created, pipeline
+  build wait, draws skipped while pipelines build, fence wait total and per wait reason, queue
+  submit and frame pacing throttle time. GPU time (`gpu_us`, `gpu_state`: complete, partial,
+  missing) is joined later by frame id from the existing timestamp queries; a record waits for
+  it at most 16 frames. `interval_us` is the time since the previous frame end on the same
+  clock; `across_pause` marks the first frame of a capture and frames that span a pause.
+  Each sampler drain appends one line `{"capture_id","mono_ms","frames":{"columns","rows",
+  "row_count","gpu_states"}}`.
+- **Limits.** Native queue of 2048 records (frames past it are counted in
+  `frames_dropped_queue_full`, never reordered); `frames.jsonl` stops at 24 MiB (about 100000
+  frames) and counts the rest in `rows_not_written_size_limit`. Nothing here waits, submits,
+  queries or changes synchronization: the cost is reading about 60 existing totals and three
+  short uncontended mutexes per frame, reported as
+  `frame_log.native.instrumentation_cpu_us` and `instrumentation_cpu_us_per_frame`.
+  Clocks, busy and thermal state stay at sample resolution (1-2 s) and are not per frame.
+- **Report.** `frame_log` (native counters and file status) and `scenes`, one entry per
+  start marker: `frames_expected`/`recorded`/`used` (whole frames strictly between the two
+  markers' frame ids; frames across a pause are excluded), `marker_duration_ms`, `host_fps`,
+  `game_fps`, `frame_interval_ms` and `gpu_ms` distributions, `gpu_coverage_pct`, `per_frame`
+  distributions, `render_pass_ends` per reason (total, per frame, reopened on the same target),
+  `fence_wait_us_per_frame` by reason, `system` (clock, limit, busy, thermal, battery of the
+  samples inside the scene) and `coverage_notes` for anything partial. `slow_frames` compares
+  frames whose interval is at least 1.5x the scene median with the others (mean per frame and
+  ratio for every count) and lists the 10 slowest. This is co-occurrence inside one scene of
+  one run: it suggests what to compare, not a cause. `summary.txt` prints the scenes right
+  after the driver evaluation.
+- **Comparison key.** `comparison_key` gathers what must match between AB/BA runs: APK
+  version name/code and native build, Eden revision, effective and per-game settings hashes,
+  driver package, name, SHA-256 and GNU build-id of the loaded driver ELF, Vulkan driver info,
+  driver environment variables, shader cache state, `resolution_setup`, swapchain size and
+  present mode, `renderer_force_max_clock`, game program and build id, capture level and
+  whether GPU time was on. Shader code, images, guest memory and additional raw logcat are not
+  collected.
+
+An example of the scene section, `summary.txt` and the comparison is in
+[examples/diagnostics-scene-report.md](examples/diagnostics-scene-report.md).
 
 ## Driver evaluation
 
@@ -486,3 +582,5 @@ confirmed or revised with five AB/BA pairs per level on the reference device.
 | 2 (additive) | `vulkan/turbo_mode` event (setting on/off, active) at renderer start |
 | 2 (additive) | `driver_environment`, `driver_log` and `logs/driver_logcat.txt` |
 | 2 (additive) | `render_passes` (samples and native summary), `render_passes` in `hitches`, `driver_evaluation` and `driver_evaluation.json`, `log_coverage.collapsed_repeated_lines`; repeated log lines collapsed in `logs/eden_log.txt` (`log_digest` still counts every occurrence) |
+| 2 | `ended_by`/`same_target_reopen_after` reasons: `outside_operation` split into `clear`, `copy`, `readback`, `blit`, `dispatch`, `eden_compute`, `query`, `barrier`, `transform_feedback`, `present`, `sync`, `other`; `deferred_clear` renamed `clear`; undeclared ends are `unknown`; all reasons always listed |
+| 2 (additive) | `scene_marker` events, `scene_markers`, `scenes`, `frame_log`, `comparison_key`, `frames.jsonl`, `native_summary.frame_log`, session `frames` and `scenes` |

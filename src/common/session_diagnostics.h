@@ -121,13 +121,21 @@ void StopCapture();
 void SetGpuTimestampsEnabled(bool enabled) noexcept;
 [[nodiscard]] bool GpuTimestampsEnabled() noexcept;
 
-/// Counts host frames handed to presentation; GPU timings are attributed to this id.
+/// Counts host frames handed to presentation; GPU timings are attributed to this id. During a
+/// capture it also closes the frame's record in the frame log.
 void AdvanceHostFrame() noexcept;
+/// Frame log records ready for export (all: including those still waiting for GPU time).
+[[nodiscard]] std::string TakeFramesJson(bool all);
 [[nodiscard]] u64 HostFrameId() noexcept;
 
 /// Set once a VK_ERROR_DEVICE_LOST was reported; GPU query results are no longer read.
 void MarkDeviceLost() noexcept;
 [[nodiscard]] bool DeviceLost() noexcept;
+
+/// Records a scene marker (kind "scene_start" or "scene_end") as an event and returns its
+/// position: {"mono_ms","mono_us","host_frame_id","capture_seq","capturing"}. The host frame id
+/// is the frame in progress; whole frames after it belong to a started scene.
+[[nodiscard]] std::string MarkScene(std::string_view kind, std::string_view name, u64 scene_id);
 
 /// Marks a break in frame pacing (capture start, emulation pause or resume). Frame intervals
 /// that began before the latest break are not recorded, so a pause is not reported as a frame.
@@ -172,6 +180,7 @@ void WriteCriticalMarker(std::string_view reason);
 [[nodiscard]] std::string_view CounterName(Counter counter) noexcept;
 [[nodiscard]] std::string_view FrameSeriesName(FrameSeries series) noexcept;
 [[nodiscard]] std::string_view StageName(Stage stage) noexcept;
+[[nodiscard]] std::string_view WaitReasonName(WaitReason reason) noexcept;
 
 /// Milliseconds on the monotonic clock (CLOCK_MONOTONIC on Android, same base as
 /// System.nanoTime() on the Java side).

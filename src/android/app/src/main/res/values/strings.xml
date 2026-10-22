@@ -1903,6 +1903,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     <string name="diagnostics_marker_category">What did you see?</string>
     <string name="diagnostics_marker_note">Describe the problem (optional)</string>
     <string name="diagnostics_marker_saved">Issue marked</string>
+    <string name="diagnostics_scene_start">Start test scene</string>
+    <string name="diagnostics_scene_end">End test scene</string>
+    <string name="diagnostics_scene_name_hint">Scene name (optional)</string>
+    <string name="diagnostics_scene_none">Mark the start and end of the same scene in every run to compare them.</string>
+    <string name="diagnostics_scene_open">Scene in progress: %1$s</string>
+    <string name="diagnostics_scene_started">Scene started</string>
+    <string name="diagnostics_scene_ended">Scene ended</string>
     <string name="diagnostics_start_failed">Could not start the capture: %1$s</string>
     <string name="diagnostics_review_export">Review and export</string>
     <string name="diagnostics_include_eden_log">Include Eden log (last 4 MiB)</string>

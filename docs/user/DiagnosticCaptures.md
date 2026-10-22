@@ -75,6 +75,24 @@ would confirm them. The same data is in `driver_evaluation.json` for driver deve
 To put several captures side by side (for example two Turnip builds), run
 `python3 tools/diagnostics/eden_diag.py driver A.zip B.zip`.
 
+## Marking a test scene
+
+To see, frame by frame, which operations close and reopen render passes in one stretch of a
+game:
+
+1. Start a capture, go to the point where the scene begins, open **Diagnostics** from the in-game
+   menu and tap **Start test scene** (give it a short name, for example `forest-run`). The dialog
+   closes and the scene starts.
+2. Play the scene, then open the dialog again and tap **End test scene**. Stopping the capture
+   also ends an open scene.
+3. Export. `summary.txt` has a **Scenes** section: frames, FPS, frame time and GPU time
+   percentiles, render passes and reopens per frame, which operations ended passes (copy,
+   readback, blit, dispatch, query, barrier, ...) and which of them are more frequent in the
+   slow frames of the scene. Those last ones are only hints: confirm them by comparing runs.
+
+Use the same name for the same scene in every run, and start and end it at the same places
+(a door, a checkpoint, a camera cut).
+
 ## Comparing two drivers or builds
 
 To compare driver A with driver B on the same scene:
@@ -86,7 +104,8 @@ To compare driver A with driver B on the same scene:
 3. Export every capture and run
    `python3 tools/diagnostics/eden_diag.py abba --a A1.zip A2.zip ... --b B1.zip B2.zip ...`.
    It refuses comparisons where something other than the driver changed and prints the median
-   and spread of each metric.
+   and spread of each metric. If you marked a scene, add `--scene forest-run` to compare only
+   that scene, frame by frame metrics included.
 
 To measure the overhead of the diagnostics themselves, alternate runs with GPU time on and off,
 and runs at Standard and Detailed level, on the same scene, and compare FPS, frame times and

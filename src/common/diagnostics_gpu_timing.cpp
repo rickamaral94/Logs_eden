@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "common/diagnostics_frame_log.h"
 #include "common/diagnostics_gpu_timing.h"
 
 namespace Common::Diagnostics::GpuTiming {
@@ -287,6 +288,7 @@ void Aggregator::FinishFrame() {
             // Submitted frames without any result (every submission unmeasured or lost).
             ++window.frames_partial;
             ++session.frames_partial;
+            FrameLog::Global().SetGpu(frame, 0, false);
         }
     }
     const bool complete = submits != 0 && frame_results.results == submits;
@@ -301,9 +303,11 @@ void Aggregator::FinishFrame() {
         frame_histogram[(std::min)(static_cast<size_t>(us / HistogramBucketUs),
                                    HistogramBuckets)]++;
         frame_max_us = (std::max)(frame_max_us, us);
+        FrameLog::Global().SetGpu(id, us, true);
     } else {
         ++window.frames_partial;
         ++session.frames_partial;
+        FrameLog::Global().SetGpu(id, 0, false);
     }
     frame_results = FrameAccum{};
 }

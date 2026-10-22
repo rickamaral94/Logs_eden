@@ -7,6 +7,7 @@
   validate BUNDLE...          integrity, coverage and privacy checks of each bundle
   compare A B                 differences between two bundles (compare_reports.py)
   abba --a A... --b B...      repeated A/B (or AB/BA) runs: comparability and per-run medians
+                              (--scene NAME: metrics of the marked scene instead of the capture)
   driver BUNDLE...            driver evaluation digest of each bundle, side by side
 
 Bundles are read only. Nothing here attributes causes: comparisons list differences,
@@ -54,6 +55,21 @@ class Bundle:
     @property
     def schema(self):
         return self.report.get("schema_version")
+
+    def frames(self):
+        """Rows of frames.jsonl as dicts keyed by column, one per frame id, in id order."""
+        rows = {}
+        raw = self.files.get("frames.jsonl", b"").decode("utf-8", "replace")
+        for line in raw.splitlines():
+            try:
+                frames = json.loads(line).get("frames") or {}
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            columns = frames.get("columns") or []
+            for row in frames.get("rows") or []:
+                if isinstance(row, list) and len(row) == len(columns):
+                    rows[row[0]] = dict(zip(columns, row))
+        return [rows[k] for k in sorted(rows)]
 
     def samples(self):
         raw = self.files.get("samples.jsonl", b"").decode("utf-8", "replace")
@@ -164,6 +180,33 @@ def validate(bundle):
         if gaps:
             add("warning", f"{len(gaps)} sample gap(s), longest {max(gaps)} ms")
 
+    frames = bundle.frames()
+    if "frames.jsonl" in bundle.files:
+        ids = [row["frame"] for row in frames]
+        gaps = sum(1 for a, b in zip(ids, ids[1:]) if b != a + 1)
+        if gaps:
+            add("warning", f"frames.jsonl: {gaps} gap(s) in host frame ids")
+        ends = [row.get("end_mono_us") for row in frames]
+        if ends != sorted(ends):
+            add("error", "frames.jsonl: frame end times are not in frame order")
+        if start is not None and frames and (ends[0] / 1000 < start - 1000):
+            add("error", "frames.jsonl: frames end before the capture start")
+    status = get(report, "frame_log", "file", default={}) or {}
+    if status.get("rows_not_written_size_limit"):
+        add("warning", f"frames.jsonl reached its size limit: "
+                       f"{status['rows_not_written_size_limit']} frames not written")
+    dropped = get(report, "frame_log", "native", "frames_dropped_queue_full")
+    if dropped:
+        add("warning", f"{dropped} frame records dropped (native queue full)")
+    for scene in report.get("scenes") or []:
+        for note in scene.get("coverage_notes") or []:
+            add("warning", f"scene {scene.get('scene_id')} ({scene.get('name')}): {note}")
+    markers = [e for e in report.get("scene_markers") or []]
+    starts = {m.get("scene_id") for m in markers if m.get("kind") == "scene_start"}
+    ends = {m.get("scene_id") for m in markers if m.get("kind") == "scene_end"}
+    if ends - starts:
+        add("error", f"scene end marker(s) without a start: {sorted(map(str, ends - starts))}")
+
     for name, status in sorted((report.get("availability") or {}).items()):
         if isinstance(status, str) and status.startswith("unavailable"):
             add("info", f"metric {name}: {status}")
@@ -228,9 +271,42 @@ def run_metrics(bundle, warmup_s=0.0):
     return metrics
 
 
+def scene_metrics(report, name):
+    """Metrics of the first scene with this name, or None when the run has none."""
+    scene = next((s for s in report.get("scenes") or [] if s.get("name") == name), None)
+    if scene is None:
+        return None
+    per_frame = scene.get("per_frame") or {}
+    slow = scene.get("slow_frames") or {}
+    used = scene.get("frames_used") or 0
+    metrics = {
+        "scene_frames": used,
+        "host_fps": scene.get("host_fps"),
+        "game_fps": scene.get("game_fps"),
+        "interval_p50_ms": get(scene, "frame_interval_ms", "p50"),
+        "interval_p90_ms": get(scene, "frame_interval_ms", "p90"),
+        "interval_p99_ms": get(scene, "frame_interval_ms", "p99"),
+        "gpu_p50_ms": get(scene, "gpu_ms", "p50"),
+        "gpu_p90_ms": get(scene, "gpu_ms", "p90"),
+        "gpu_coverage_pct": scene.get("gpu_coverage_pct"),
+        "slow_frames_pct": (slow.get("slow", 0) * 100.0 / used) if used else None,
+    }
+    for key in ("draws", "passes", "reopens", "empty_passes", "pipelines_created",
+                "fence_wait_us"):
+        metrics[f"{key}_per_frame"] = get(per_frame, key, "mean")
+    for reason, value in sorted((scene.get("render_pass_ends") or {}).items()):
+        if value.get("total"):
+            metrics[f"end_{reason}_per_frame"] = value.get("per_frame")
+            metrics[f"reopen_after_{reason}_per_frame"] = value.get("reopened_per_frame")
+    metrics["thermal_status_max"] = get(scene, "system", "thermal_status", "max")
+    metrics["gpu_clock_mhz_avg"] = get(scene, "system", "gpu_clock_mhz_kgsl", "avg")
+    return metrics
+
+
 def identity(report):
     swapchain = get(report, "vulkan", "swapchain", default={}) or {}
     driver = get(report, "vulkan", "device", "driver", default={}) or {}
+    key = report.get("comparison_key") or {}
     return {
         "game": get(report, "game", "frontend", "program_id"),
         "game_build": get(report, "game", "native", "build_id"),
@@ -243,13 +319,19 @@ def identity(report):
         "present_mode": swapchain.get("present_mode"),
         "cpu_backend": report.get("cpu_backend"),
         "capture_level": get(report, "session", "level"),
+        # Older bundles have no comparison_key: these compare as equal (None).
+        "driver_elf": key.get("driver_elf_sha256") or key.get("driver_elf_build_id"),
+        "apk": (key.get("apk_version_code"), key.get("apk_build_native")),
+        "resolution_setup": key.get("resolution_setup"),
+        "driver_environment": json.dumps(key.get("driver_environment"), sort_keys=True)
+        if key.get("driver_environment") is not None else None,
     }
 
 
 VARIABLE_FIELDS = {
-    "driver": {"driver"},
-    "build": {"eden_revision"},
-    "settings": {"settings", "present_mode", "resolution"},
+    "driver": {"driver", "driver_elf"},
+    "build": {"eden_revision", "apk"},
+    "settings": {"settings", "present_mode", "resolution", "resolution_setup"},
     "none": set(),
 }
 
@@ -309,9 +391,26 @@ def comparability(runs, variable):
     return blockers, caveats
 
 
-def abba(runs, variable, warmup_s=0.0):
+def abba(runs, variable, warmup_s=0.0, scene=None):
     out = []
     blockers, caveats = comparability(runs, variable)
+    if scene is not None:
+        frames = []
+        for label, bundle in runs:
+            values = scene_metrics(bundle.report, scene)
+            if values is None:
+                blockers.append(f"{label} {bundle.path}: no scene named {scene!r}")
+                continue
+            frames.append(values["scene_frames"])
+            if (values.get("thermal_status_max") or 0) > 0:
+                caveats.append(f"{label} {bundle.path}: thermal status "
+                               f"{values['thermal_status_max']} during the scene")
+            if (values.get("gpu_coverage_pct") or 0) < 90:
+                caveats.append(f"{label} {bundle.path}: GPU time for "
+                               f"{fmt(values.get('gpu_coverage_pct'))}% of scene frames")
+        if frames and max(frames) > 1.25 * max(min(frames), 1):
+            caveats.append("scene frame counts differ by more than 25% (scene not marked "
+                           "the same way?)")
     out.append("== Comparability ==")
     for blocker in blockers:
         out.append(f"  BLOCKER: {blocker}")
@@ -320,9 +419,16 @@ def abba(runs, variable, warmup_s=0.0):
     if not blockers and not caveats:
         out.append("  (no blockers or caveats found)")
     out.append("")
-    metrics = [(label, bundle.path, run_metrics(bundle, warmup_s)) for label, bundle in runs]
-    names = list(metrics[0][2])
-    out.append("== Runs ==" + (f" (after {warmup_s:g} s warm-up)" if warmup_s else ""))
+    if scene is not None:
+        metrics = [(label, bundle.path, scene_metrics(bundle.report, scene) or {})
+                   for label, bundle in runs]
+    else:
+        metrics = [(label, bundle.path, run_metrics(bundle, warmup_s)) for label, bundle in runs]
+    names = []
+    for _, _, values in metrics:
+        names += [n for n in values if n not in names]
+    out.append("== Runs ==" + (f" (scene {scene!r})" if scene is not None else "")
+               + (f" (after {warmup_s:g} s warm-up)" if warmup_s and scene is None else ""))
     for label, path, values in metrics:
         out.append(f"  {label} {path}")
         out.append("    " + ", ".join(f"{k}={fmt(v)}" for k, v in values.items()))
@@ -484,6 +590,7 @@ def main(argv=None):
                    help="what is meant to differ between A and B (default: driver)")
     r.add_argument("--warmup-s", type=float, default=0.0,
                    help="ignore sample windows before this many seconds")
+    r.add_argument("--scene", help="compare the marked scene with this name in every run")
     d = sub.add_parser("driver", help="driver evaluation digest of each bundle, side by side")
     d.add_argument("bundles", nargs="+")
     d.add_argument("--json", action="store_true", help="print the digests as JSON")
@@ -513,7 +620,7 @@ def main(argv=None):
         sys.stdout.write(compare_reports.compare(Bundle(args.a).report, Bundle(args.b).report))
         return 0
     runs = [("A", Bundle(p)) for p in args.a] + [("B", Bundle(p)) for p in args.b]
-    text, blocked = abba(runs, args.variable, args.warmup_s)
+    text, blocked = abba(runs, args.variable, args.warmup_s, args.scene)
     sys.stdout.write(text)
     return 2 if blocked else 0
 

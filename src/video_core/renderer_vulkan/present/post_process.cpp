@@ -871,7 +871,7 @@ void PostProcessChain::Draw(const Device& device, Scheduler& scheduler, size_t i
             const VkExtent2D extent = pass.extent;
             const u32 vertices = pass.num_vertices;
 
-            scheduler.RequestOutsideRenderPassOperationContext();
+            scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
             scheduler.Record([=](vk::CommandBuffer cmdbuf) {
                 TransitionImageLayout(cmdbuf, source_image, VK_IMAGE_LAYOUT_GENERAL);
                 TransitionImageLayout(cmdbuf, target_image, VK_IMAGE_LAYOUT_GENERAL);

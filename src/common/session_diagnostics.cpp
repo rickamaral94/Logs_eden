@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "common/diagnostics_frame_log.h"
 #include "common/diagnostics_gpu_timing.h"
 #include "common/diagnostics_render_passes.h"
 #include "common/session_diagnostics.h"
@@ -172,6 +173,7 @@ struct State {
     std::atomic<u64> capture_seq{};
     std::atomic<u64> game_run{};
     std::atomic<u64> host_frame{};
+    std::atomic<s64> last_frame_end_ns{};
     std::atomic<s64> discontinuity_ns{};
     std::array<std::atomic<u64>, SeriesCount> session_across_discontinuity{};
     std::atomic<bool> gpu_timestamps{true};
@@ -499,6 +501,7 @@ json SummaryObject(State& state) {
         {"counters", std::move(counters)},
         {"frames", std::move(frames)},
         {"gpu_timing", ParseOrString(GpuTiming::Global().SessionJson())},
+        {"frame_log", ParseOrString(FrameLog::Global().SessionJson())},
         {"render_passes", ParseOrString(RenderPasses::Global().SessionJson())},
         {"fence_wait_by_reason", WaitReasonsJson(state.session_waits, false)},
         {"fence_wait_by_thread", std::move(wait_threads)},
@@ -512,6 +515,8 @@ void ResetCaptureData(State& state) {
     }
     GpuTiming::Global().Reset();
     RenderPasses::Global().Reset();
+    FrameLog::Global().Reset();
+    state.last_frame_end_ns.store(0, std::memory_order_relaxed);
     for (auto& timer : state.window_timers) {
         timer.Reset();
     }
@@ -569,6 +574,11 @@ std::string_view TimerName(Timer timer) noexcept {
 
 std::string_view CounterName(Counter counter) noexcept {
     return COUNTER_NAMES[static_cast<size_t>(counter)];
+}
+
+std::string_view WaitReasonName(WaitReason reason) noexcept {
+    const auto index = static_cast<size_t>(reason);
+    return index < WAIT_REASON_NAMES.size() ? WAIT_REASON_NAMES[index] : "unknown";
 }
 
 std::string_view FrameSeriesName(FrameSeries series) noexcept {
@@ -643,8 +653,94 @@ bool GpuTimestampsEnabled() noexcept {
     return GetState().gpu_timestamps.load(std::memory_order_relaxed);
 }
 
+namespace {
+
+// Capture totals at the end of a host frame, in FrameLog::Index order.
+FrameLog::Values FrameTotals(State& state) {
+    namespace Index = FrameLog::Index;
+    FrameLog::Values values{};
+    const auto counter = [&state](Counter c) {
+        return state.session_counters[static_cast<size_t>(c)].load(std::memory_order_relaxed);
+    };
+    const auto timer_us = [&state](Timer t) {
+        return state.session_timers[static_cast<size_t>(t)].total_ns.load(
+                   std::memory_order_relaxed) /
+               1000;
+    };
+    const RenderPasses::Totals passes = RenderPasses::Global().SessionTotals();
+    values[Index::GameFrames] = counter(Counter::GameFrames);
+    values[Index::Draws] = counter(Counter::DrawCalls);
+    values[Index::IndexedDraws] = counter(Counter::IndexedDrawCalls);
+    values[Index::IndirectDraws] = counter(Counter::IndirectDrawCalls);
+    values[Index::Passes] = passes.passes;
+    values[Index::EmptyPasses] = passes.empty;
+    values[Index::Reopens] = passes.same_target_reopen;
+    for (size_t i = 0; i < Index::EndReasons; ++i) {
+        values[Index::EndedBy + i] = passes.ended_by[i];
+        values[Index::ReopenAfter + i] = passes.reopen_after[i];
+    }
+    values[Index::Submits] = counter(Counter::SchedulerSubmits);
+    values[Index::Dispatches] = counter(Counter::ComputeDispatches);
+    values[Index::UploadBytes] = counter(Counter::StagingUploadBytes);
+    values[Index::DownloadBytes] = counter(Counter::StagingDownloadBytes);
+    values[Index::PipelinesCreated] =
+        counter(Counter::GraphicsPipelineCacheMiss) + counter(Counter::ComputePipelineCacheMiss);
+    values[Index::PipelineBuildWaitUs] = timer_us(Timer::PipelineBuildWait);
+    values[Index::DrawsSkippedPipelinePending] = counter(Counter::DrawSkippedPipelinePending);
+    values[Index::FenceWaitUs] = timer_us(Timer::FenceWait);
+    for (size_t i = 0; i < Index::WaitReasons; ++i) {
+        values[Index::WaitByReasonUs + i] =
+            state.session_waits[i].timer.total_ns.load(std::memory_order_relaxed) / 1000;
+    }
+    values[Index::QueueSubmitUs] = timer_us(Timer::QueueSubmit);
+    values[Index::FramePacingThrottleUs] = timer_us(Timer::FramePacingThrottle);
+    return values;
+}
+
+} // namespace
+
 void AdvanceHostFrame() noexcept {
-    GetState().host_frame.fetch_add(1, std::memory_order_relaxed);
+    auto& state = GetState();
+    // Submissions recorded during this frame carry the id before the increment.
+    const u64 ended = state.host_frame.fetch_add(1, std::memory_order_relaxed);
+    if (!IsCapturing()) {
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const s64 now_ns = start.time_since_epoch().count();
+    const s64 previous_ns = state.last_frame_end_ns.exchange(now_ns, std::memory_order_relaxed);
+    const bool across_pause =
+        previous_ns == 0 || previous_ns <= state.discontinuity_ns.load(std::memory_order_relaxed);
+    auto& log = FrameLog::Global();
+    log.OnFrame(ended,
+                std::chrono::duration_cast<std::chrono::microseconds>(start.time_since_epoch())
+                    .count(),
+                across_pause, FrameTotals(state));
+    log.AddCost(static_cast<u64>((std::chrono::steady_clock::now() - start).count()));
+}
+
+std::string MarkScene(std::string_view kind, std::string_view name, u64 scene_id) {
+    auto& state = GetState();
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const u64 frame = HostFrameId();
+    const bool capturing = IsCapturing();
+    const u64 capture_seq = state.capture_seq.load(std::memory_order_relaxed);
+    RecordEvent(Severity::Info, "scene", kind,
+                {{"name", std::string{name}},
+                 {"scene_id", std::to_string(scene_id)},
+                 {"host_frame_id", std::to_string(frame)}});
+    return json{
+        {"mono_ms", std::chrono::duration_cast<std::chrono::milliseconds>(now).count()},
+        {"mono_us", std::chrono::duration_cast<std::chrono::microseconds>(now).count()},
+        {"host_frame_id", frame},
+        {"capture_seq", capture_seq},
+        {"capturing", capturing},
+    }
+        .dump();
+}
+
+std::string TakeFramesJson(bool all) {
+    return FrameLog::Global().Drain(HostFrameId(), all);
 }
 
 u64 HostFrameId() noexcept {

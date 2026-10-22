@@ -182,7 +182,7 @@ VkImageView FSR::Draw(const Device& device, Scheduler& scheduler, size_t image_i
     UploadImages(device, scheduler);
     UpdateDescriptorSets(device, source_image_view, image_index);
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         TransitionImageLayout(cmdbuf, source_image, VK_IMAGE_LAYOUT_GENERAL);
         TransitionImageLayout(cmdbuf, easu_image, VK_IMAGE_LAYOUT_GENERAL);

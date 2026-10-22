@@ -102,7 +102,7 @@ void UploadImage(const Device& device, MemoryAllocator& allocator, Scheduler& sc
         .imageExtent{.width = dimensions.width, .height = dimensions.height, .depth = 1},
     }}};
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     scheduler.Record([&](vk::CommandBuffer cmdbuf) {
         TransitionImageLayout(cmdbuf, *image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                               VK_IMAGE_LAYOUT_UNDEFINED);

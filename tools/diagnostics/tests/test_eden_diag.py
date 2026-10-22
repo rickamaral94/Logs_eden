@@ -166,6 +166,96 @@ class AbbaTest(unittest.TestCase):
         self.assertAlmostEqual(metrics["frame_gpu_mean_ms"], 9.0)
 
 
+def scene(name="bridge", fps=40.0, readback=3.0, frames=400, thermal=0):
+    return {"scene_id": 1, "name": name, "frames_used": frames, "host_fps": fps,
+            "frame_interval_ms": {"p50": 1000 / fps, "p90": 30.0, "p99": 50.0},
+            "gpu_ms": {"p50": 12.0, "p90": 20.0}, "gpu_coverage_pct": 99.0,
+            "per_frame": {"passes": {"mean": 121.0}, "reopens": {"mean": 41.0}},
+            "render_pass_ends": {"readback": {"total": int(readback * frames),
+                                              "per_frame": readback,
+                                              "reopened_per_frame": readback},
+                                 "unknown": {"total": 0, "per_frame": 0.0}},
+            "slow_frames": {"slow": 20},
+            "system": {"thermal_status": {"max": thermal}}}
+
+
+def frames_file(rows, columns=("frame", "end_mono_us", "interval_us")):
+    return json.dumps({"capture_id": "c", "frames": {
+        "columns": list(columns), "row_count": len(rows), "rows": rows}}).encode() + b"\n"
+
+
+class SceneTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def bundle(self, name, rep, extra=None):
+        return eden_diag.Bundle(write_bundle(self.tmp.name, name, rep, extra))
+
+    def test_abba_compares_the_marked_scene(self):
+        runs = []
+        for i, (label, fps, readback, elf) in enumerate([
+                ("A", 40.0, 3.0, "aa"), ("B", 44.0, 1.0, "bb"),
+                ("B", 45.0, 1.0, "bb"), ("A", 41.0, 3.0, "aa")]):
+            rep = report(started=f"2026-01-01T00:{i}0:00Z")
+            rep["scenes"] = [scene(fps=fps, readback=readback)]
+            rep["comparison_key"] = {"driver_elf_sha256": elf}
+            runs.append((label, self.bundle(f"{i}.zip", rep)))
+        text, blocked = eden_diag.abba(runs, "driver", scene="bridge")
+        self.assertFalse(blocked)
+        self.assertIn("(scene 'bridge')", text)
+        self.assertIn("end_readback_per_frame: A 3.00 (3.00 - 3.00, n=2); B 1.00", text)
+        self.assertIn("host_fps: A 40.50", text)
+
+    def test_missing_scene_or_other_driver_elf_blocks(self):
+        rep_a = report()
+        rep_a["scenes"] = [scene()]
+        rep_a["comparison_key"] = {"driver_elf_sha256": "aa"}
+        rep_b = report()
+        rep_b["scenes"] = [scene(name="other")]
+        rep_b["comparison_key"] = {"driver_elf_sha256": "bb"}
+        runs = [("A", self.bundle("a.zip", rep_a)), ("B", self.bundle("b.zip", rep_b))]
+        text, blocked = eden_diag.abba(runs, "settings", scene="bridge")
+        self.assertTrue(blocked)
+        self.assertIn("no scene named 'bridge'", text)
+        self.assertIn("BLOCKER: driver_elf differs between runs", text)
+
+    def test_scene_caveats_for_heat_and_frame_counts(self):
+        rep_a = report()
+        rep_a["scenes"] = [scene(frames=400, thermal=2)]
+        rep_b = report("Other")
+        rep_b["scenes"] = [scene(frames=200)]
+        runs = [("A", self.bundle("a.zip", rep_a)), ("B", self.bundle("b.zip", rep_b))]
+        text, _ = eden_diag.abba(runs, "driver", scene="bridge")
+        self.assertIn("thermal status 2 during the scene", text)
+        self.assertIn("scene frame counts differ by more than 25%", text)
+
+    def test_validate_checks_frames_and_scene_markers(self):
+        rep = report()
+        rep["frame_log"] = {"file": {"rows_not_written_size_limit": 12},
+                            "native": {"frames_dropped_queue_full": 3}}
+        rep["scene_markers"] = [{"kind": "scene_end", "scene_id": 4}]
+        rep["scenes"] = [dict(scene(), coverage_notes=["2 frames of the scene are missing"])]
+        frames = frames_file([[1, 2_000_000, 0], [2, 2_025_000, 25_000], [4, 2_024_000, 0]])
+        findings = eden_diag.validate(self.bundle("v.zip", rep, {"frames.jsonl": frames}))
+        messages = [m for _, m in findings]
+        self.assertIn("frames.jsonl: 1 gap(s) in host frame ids", messages)
+        self.assertIn(("error", "frames.jsonl: frame end times are not in frame order"), findings)
+        self.assertIn("frames.jsonl reached its size limit: 12 frames not written", messages)
+        self.assertIn("3 frame records dropped (native queue full)", messages)
+        self.assertIn(("error", "scene end marker(s) without a start: ['4']"), findings)
+        self.assertTrue(any("2 frames of the scene are missing" in m for m in messages))
+
+    def test_frames_drained_twice_are_read_once(self):
+        frames = frames_file([[1, 2_000_000, 0], [2, 2_025_000, 25_000]]) + \
+            frames_file([[2, 2_025_000, 25_000], [3, 2_050_000, 25_000]])
+        bundle = self.bundle("f.zip", report(), {"frames.jsonl": frames})
+        self.assertEqual([r["frame"] for r in bundle.frames()], [1, 2, 3])
+        self.assertFalse([f for f in eden_diag.validate(bundle) if "frames.jsonl" in f[1]])
+
+
 class DriverTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

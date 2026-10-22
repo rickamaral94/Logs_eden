@@ -238,7 +238,7 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
     RenderScreenshot(framebuffers);
     Frame* frame = present_manager.GetRenderFrame();
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     blit_swapchain.DrawToFrame(device, rasterizer, frame, framebuffers,
                                render_window.GetFramebufferLayout(),
                                present_manager.SwapchainImageCount(),
@@ -311,7 +311,7 @@ vk::Buffer RendererVulkan::RenderToBuffer(std::span<const Tegra::FramebufferConf
     auto dst_buffer = CreateWrappedBuffer(memory_allocator, buffer_size, MemoryUsage::Download);
     blit_capture.DrawToFrame(device, rasterizer, &frame, framebuffers, layout, 1, format);
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     scheduler.Record([&](vk::CommandBuffer cmdbuf) {
         DownloadColorImage(cmdbuf, *frame.image, *dst_buffer,
                            VkExtent3D{layout.width, layout.height, 1});
@@ -355,7 +355,7 @@ std::vector<u8> RendererVulkan::GetAppletCaptureBuffer() {
     const auto dst_buffer =
         CreateWrappedBuffer(memory_allocator, VideoCore::Capture::TiledSize, MemoryUsage::Download);
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     scheduler.Record([&](vk::CommandBuffer cmdbuf) {
         DownloadColorImage(cmdbuf, *applet_frame.image, *dst_buffer, CaptureImageExtent);
     });
@@ -386,7 +386,7 @@ void RendererVulkan::RenderAppletCaptureLayer(
             VideoCore::Capture::Layout, *applet_frame.image_view, CaptureFormat);
     }
 
-    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Present);
     blit_applet.DrawToFrame(device, rasterizer, &applet_frame, capture_layers, VideoCore::Capture::Layout, 1,
                             CaptureFormat);
 }

@@ -202,10 +202,10 @@ object DriverEvaluation {
             hypotheses += hypothesis(
                 "reopen_costs_gmem_round_trips",
                 "On a tiled renderer every reopened pass reloads and stores its attachments; " +
-                    "passes split by operations outside the render pass (copies, dispatches, " +
-                    "queries) may cost more in GMEM than in sysmem mode",
-                "compare GPU frame time with TU_DEBUG=sysmem against the default (gmem) " +
-                    "in an ABBA run of the same scene"
+                    "passes split by operations outside the render pass (see the reasons in " +
+                    "same_target_reopen_after) may cost more than the work they enclose",
+                "mark the same scene in AB/BA runs and compare frame time and GPU time " +
+                    "against the per-frame reopen counts in scenes"
             )
         }
         val loadsPerPass = loads / count

@@ -33,8 +33,6 @@ namespace Vulkan {
 
 namespace {
 
-using RenderPassEnd = Common::Diagnostics::RenderPasses::EndReason;
-
 template <typename Handle>
 u64 HandleBits(Handle handle) {
     if constexpr (std::is_pointer_v<Handle>) {
@@ -245,7 +243,7 @@ void Scheduler::RealizeDeferredClear() {
     key.depth_stencil_clear = dc.depth_stencil;
     key.color_discard_mask = color_discard_mask;
     key.depth_stencil_discard = depth_stencil_discard;
-    EndRenderPass(RenderPassEnd::DeferredClear);
+    EndRenderPass(RenderPassEnd::Clear);
     BeginRenderPassImpl(dc.framebuffer, renderpass, key, clear_values.data(), count);
 }
 
@@ -256,7 +254,7 @@ bool Scheduler::DeferColorClear(const Framebuffer* framebuffer, u32 rt_slot,
     }
     if (deferred_clear.framebuffer != nullptr && deferred_clear.framebuffer != framebuffer) {
         RealizeDeferredClear();
-        EndRenderPass(RenderPassEnd::DeferredClear);
+        EndRenderPass(RenderPassEnd::Clear);
     }
     deferred_clear.framebuffer = framebuffer;
     deferred_clear.color_clear_mask |= 1u << rt_slot;
@@ -270,7 +268,7 @@ bool Scheduler::DeferDepthStencilClear(const Framebuffer* framebuffer, const VkC
     }
     if (deferred_clear.framebuffer != nullptr && deferred_clear.framebuffer != framebuffer) {
         RealizeDeferredClear();
-        EndRenderPass(RenderPassEnd::DeferredClear);
+        EndRenderPass(RenderPassEnd::Clear);
     }
     deferred_clear.framebuffer = framebuffer;
     deferred_clear.depth_stencil = true;
@@ -283,7 +281,7 @@ void Scheduler::FlushDeferredClear() {
         return;
     }
     RealizeDeferredClear();
-    EndRenderPass(RenderPassEnd::DeferredClear);
+    EndRenderPass(RenderPassEnd::Clear);
 }
 
 void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
@@ -304,8 +302,8 @@ void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
     BeginRenderPassImpl(framebuffer, renderpass, framebuffer->RenderPassKeyBase(), nullptr, 0);
 }
 
-void Scheduler::RequestOutsideRenderPassOperationContext() {
-    EndRenderPass(RenderPassEnd::OutsideOperation);
+void Scheduler::RequestOutsideRenderPassOperationContext(RenderPassEnd reason) {
+    EndRenderPass(reason);
 }
 
 bool Scheduler::UpdateGraphicsPipeline(GraphicsPipeline* pipeline) {

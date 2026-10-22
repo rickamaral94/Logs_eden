@@ -18,14 +18,38 @@
 // bookkeeping can be tested on the host.
 namespace Common::Diagnostics::RenderPasses {
 
-/// Why the scheduler closed a render pass.
+/// Why the scheduler closed a render pass. Operations that must run outside a render pass
+/// pass their class to Scheduler::RequestOutsideRenderPassOperationContext; a call site that
+/// does not is counted as Unknown.
 enum class EndReason : u8 {
-    NextTarget,       ///< Another framebuffer or render pass was requested.
-    OutsideOperation, ///< A copy, blit, dispatch, query or barrier needed to run outside.
-    Submit,           ///< The command buffer was flushed or finished.
-    DeferredClear,    ///< A pending clear was realized as its own pass.
-    Other,
+    NextTarget,        ///< Another framebuffer or render pass was requested.
+    Submit,            ///< The command buffer was flushed or finished.
+    Clear,             ///< A deferred clear was realized, or a buffer was cleared.
+    Copy,              ///< Buffer or image copy, upload or reinterpretation on the GPU.
+    Readback,          ///< Image download to host memory.
+    Blit,              ///< Blit, scale or MSAA copy through a helper pass.
+    Dispatch,          ///< Guest compute dispatch.
+    EdenCompute,       ///< Eden helper compute (index conversion, ASTC decode, unswizzle).
+    Query,             ///< Query reset, copy or resolve.
+    Barrier,           ///< Explicit barrier, feedback loop or layout transition.
+    TransformFeedback, ///< Transform feedback setup.
+    Present,           ///< Composition, post-processing and presentation of a frame.
+    Sync,              ///< Wait for idle.
+    Other,             ///< Outside operation without a more specific class.
+    Unknown,           ///< Closed without a declared reason.
     Count,
+};
+
+inline constexpr size_t EndReasonCount = static_cast<size_t>(EndReason::Count);
+
+/// Cumulative counts of a capture, read at frame boundaries by the frame log.
+struct Totals {
+    u64 passes{};
+    u64 empty{};
+    u64 draws{};
+    u64 same_target_reopen{};
+    std::array<u64, EndReasonCount> ended_by{};
+    std::array<u64, EndReasonCount> reopen_after{};
 };
 
 struct PassInfo {
@@ -68,6 +92,7 @@ public:
 
     [[nodiscard]] std::string TakeWindowJson();
     [[nodiscard]] std::string SessionJson() const;
+    [[nodiscard]] Totals SessionTotals() const;
 
     [[nodiscard]] static size_t DrawBucket(u64 draws) noexcept;
 
@@ -97,8 +122,8 @@ private:
         u64 resolves{};
         u64 same_target_reopen{};
         std::array<u64, DrawBuckets> draw_buckets{};
-        std::array<u64, static_cast<size_t>(EndReason::Count)> ended_by{};
-        std::array<u64, static_cast<size_t>(EndReason::Count)> reopen_after{};
+        std::array<u64, EndReasonCount> ended_by{};
+        std::array<u64, EndReasonCount> reopen_after{};
     };
     struct Shape {
         std::string description;
@@ -108,7 +133,7 @@ private:
         u64 draws{};
         u64 pixels{};
         u64 same_target_reopen{};
-        std::array<u64, static_cast<size_t>(EndReason::Count)> ended_by{};
+        std::array<u64, EndReasonCount> ended_by{};
     };
     struct Frame {
         u64 id{};
@@ -129,7 +154,7 @@ private:
     u64 current_draws{};
     u64 current_frame{};
     u64 last_target{};
-    EndReason last_end{EndReason::Other};
+    EndReason last_end{EndReason::Unknown};
     bool have_last{};
 
     mutable std::mutex mutex;
