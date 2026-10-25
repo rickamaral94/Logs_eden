@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <vector>
 #include <glad/glad.h>
 #include "common/common_types.h"
@@ -78,6 +79,7 @@ private:
 
     std::unique_ptr<BlitScreen> blit_screen;
     std::unique_ptr<BlitScreen> blit_applet;
+    std::chrono::steady_clock::time_point last_composite_time{};
 };
 
 } // namespace OpenGL

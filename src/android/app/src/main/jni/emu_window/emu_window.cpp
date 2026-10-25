@@ -21,6 +21,7 @@
 #include "input_common/drivers/virtual_gamepad.h"
 #include "input_common/main.h"
 #include "jni/emu_window/emu_window.h"
+#include "jni/emu_window/gl_context.h"
 #include "jni/native.h"
 
 void EmuWindow_Android::OnSurfaceChanged(ANativeWindow* surface) {
@@ -46,6 +47,19 @@ void EmuWindow_Android::OnSurfaceChanged(ANativeWindow* surface) {
 
     window_info.render_surface = reinterpret_cast<void*>(surface);
     UpdateFrameRateHint();
+}
+
+std::unique_ptr<Core::Frontend::GraphicsContext> EmuWindow_Android::CreateSharedContext() const {
+    if (Settings::IsOpenGL()) {
+        const bool presenter = m_gl_share_context == nullptr;
+        auto context = std::make_unique<AndroidGL::Context>(*this, m_gl_share_context, presenter,
+                                                            m_driver_library);
+        if (presenter) {
+            m_gl_share_context = context->Handle();
+        }
+        return context;
+    }
+    return std::make_unique<GraphicsContext_Android>(m_driver_library);
 }
 
 void EmuWindow_Android::OnTouchPressed(int id, float x, float y) {

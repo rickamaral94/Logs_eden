@@ -7,6 +7,8 @@
 add_library(yuzu-android SHARED
     emu_window/emu_window.cpp
     emu_window/emu_window.h
+    emu_window/gl_context.cpp
+    emu_window/gl_context.h
     native.cpp
     native.h
     native_config.cpp

@@ -1,0 +1,48 @@
+diff --git a/src/egl/drivers/dri2/platform_surfaceless.c b/src/egl/drivers/dri2/platform_surfaceless.c
+index 8fbb9a6..2829219 100644
+--- a/src/egl/drivers/dri2/platform_surfaceless.c
++++ b/src/egl/drivers/dri2/platform_surfaceless.c
+@@ -389,7 +389,8 @@ dri2_initialize_surfaceless(_EGLDisplay *disp)
+     */
+    driver_loaded = surfaceless_probe_device(disp, disp->Options.ForceSoftware,
+                                             disp->Options.Zink);
+-   if (!driver_loaded && disp->Options.ForceSoftware) {
++   /* Eden: Zink needs no DRM device (Android apps cannot open one). */
++   if (!driver_loaded && (disp->Options.ForceSoftware || disp->Options.Zink)) {
+       _eglLog(_EGL_DEBUG, "Falling back to surfaceless swrast without DRM.");
+       driver_loaded = surfaceless_probe_device_sw(disp);
+    }
+diff --git a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
+index 93bdd32..26fce87 100644
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -3267,15 +3267,25 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
+ 
+    u_trace_state_init();
+ 
+-   screen->loader_lib = util_dl_open(VK_LIBNAME);
+-   if (!screen->loader_lib) {
++   /* Eden: use the Vulkan driver the emulator already loaded (adrenotools). */
++   const char *ext_gipa = getenv("EDEN_ZINK_VK_GIPA");
++   const char *ext_gdpa = getenv("EDEN_ZINK_VK_GDPA");
++   if (ext_gipa && ext_gdpa) {
++      screen->vk_GetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)(uintptr_t)strtoull(ext_gipa, NULL, 16);
++      screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)(uintptr_t)strtoull(ext_gdpa, NULL, 16);
++   }
++   if (!screen->vk_GetInstanceProcAddr)
++      screen->loader_lib = util_dl_open(VK_LIBNAME);
++   if (!screen->vk_GetInstanceProcAddr && !screen->loader_lib) {
+       if (!screen->driver_name_is_inferred)
+          mesa_loge("ZINK: failed to load "VK_LIBNAME);
+       goto fail;
+    }
+ 
+-   screen->vk_GetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetInstanceProcAddr");
+-   screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetDeviceProcAddr");
++   if (screen->loader_lib) {
++      screen->vk_GetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetInstanceProcAddr");
++      screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetDeviceProcAddr");
++   }
+    if (!screen->vk_GetInstanceProcAddr ||
+        !screen->vk_GetDeviceProcAddr) {
+       if (!screen->driver_name_is_inferred)

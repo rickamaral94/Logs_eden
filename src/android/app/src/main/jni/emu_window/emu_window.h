@@ -47,9 +47,7 @@ public:
     void OnTouchMoved(int id, float x, float y);
     void OnTouchReleased(int id);
 
-    std::unique_ptr<Core::Frontend::GraphicsContext> CreateSharedContext() const override {
-        return {std::make_unique<GraphicsContext_Android>(m_driver_library)};
-    }
+    std::unique_ptr<Core::Frontend::GraphicsContext> CreateSharedContext() const override;
     bool IsShown() const override {
         return true;
     };
@@ -68,6 +66,8 @@ private:
     float m_window_height{};
 
     std::shared_ptr<Common::DynamicLibrary> m_driver_library;
+    // OpenGL: the first context presents; the others share its objects.
+    mutable void* m_gl_share_context{};
 
     bool m_first_frame = false;
     float m_last_frame_rate_hint = -1.0f;

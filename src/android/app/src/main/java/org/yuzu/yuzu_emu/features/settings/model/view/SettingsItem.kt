@@ -965,6 +965,7 @@ abstract class SettingsItem(
                 SingleChoiceSetting(
                     IntSetting.RENDERER_BACKEND,
                     titleId = R.string.renderer_api,
+                    descriptionId = R.string.renderer_api_description,
                     choicesId = R.array.rendererApiNames,
                     valuesId = R.array.rendererApiValues
                 )

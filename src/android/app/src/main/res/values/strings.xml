@@ -647,6 +647,7 @@
 
     <string name="gpu">GPU</string>
     <string name="renderer_api">API</string>
+    <string name="renderer_api_description">OpenGL runs the desktop OpenGL renderer through Mesa\'s Zink on top of the Vulkan driver, for compatibility checks and comparisons with Vulkan. It is slower: each frame is copied to the screen by the CPU.</string>
     <string name="renderer_debug">Graphics debugging</string>
     <string name="renderer_debug_description">Sets the graphics API to a slow debugging mode.</string>
     <string name="patch_old_qcom_drivers">BCn Texture Patching</string>
@@ -1122,6 +1123,7 @@
 
     <!-- Renderer APIs -->
     <string name="renderer_vulkan" translatable="false">Vulkan</string>
+    <string name="renderer_opengl" translatable="false">OpenGL 4.6 (Mesa Zink)</string>
     <string name="renderer_none">None</string>
 
     <!-- Renderer Accuracy -->

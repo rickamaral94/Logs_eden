@@ -10,9 +10,11 @@
 #include <memory>
 
 #include <glad/glad.h>
+#include <nlohmann/json.hpp>
 
 #include "common/assert.h"
 #include "common/logging.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "core/core_timing.h"
 #include "core/frontend/emu_window.h"
@@ -139,6 +141,18 @@ void RendererOpenGL::Composite(std::span<const Tegra::FramebufferConfig> framebu
         return;
     }
 
+    Common::Diagnostics::AdvanceHostFrame();
+    if (Common::Diagnostics::IsCapturing()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (last_composite_time.time_since_epoch().count() != 0) {
+            Common::Diagnostics::RecordFrameInterval(Common::Diagnostics::FrameSeries::HostPresent,
+                                                     now - last_composite_time);
+        }
+        last_composite_time = now;
+    } else {
+        last_composite_time = {};
+    }
+
     RenderAppletCaptureLayer(framebuffers);
     RenderScreenshot(framebuffers);
 
@@ -162,6 +176,10 @@ void RendererOpenGL::AddTelemetryFields() {
     LOG_INFO(Render_OpenGL, "GL_VERSION: {}", gl_version);
     LOG_INFO(Render_OpenGL, "GL_VENDOR: {}", gpu_vendor);
     LOG_INFO(Render_OpenGL, "GL_RENDERER: {}", gpu_model);
+    Common::Diagnostics::SetSection(
+        "opengl_device",
+        nlohmann::json{{"version", gl_version}, {"vendor", gpu_vendor}, {"renderer", gpu_model}}
+            .dump());
 }
 
 void RendererOpenGL::RenderToBuffer(std::span<const Tegra::FramebufferConfig> framebuffers,

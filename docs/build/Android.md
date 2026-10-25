@@ -83,6 +83,41 @@ Examples:
 * Build optimized release with update checker for ChromeOS:
   * `.ci/android/build.sh -c -r -t optimized`
 
+### OpenGL backend (Mesa Zink)
+
+The Android build includes the desktop OpenGL 4.6 renderer. Android has no desktop OpenGL, so
+the app loads Mesa's EGL with the Zink driver (OpenGL on top of Vulkan) from its own libraries.
+Build them once before building the APK; the CI does this and caches the result:
+
+```sh
+sh .ci/android/build-mesa-zink.sh   # needs meson >= 1.4, ninja, flex, bison, patchelf, mako, pyyaml
+```
+
+The script cross-builds the Mesa tag in `MESA_VERSION` with the NDK, applies
+`.ci/android/mesa/eden-zink.patch` and copies `libEGL_mesa.so`, `libgallium_dri.so` and their
+helpers into `src/android/app/src/main/jniLibs/arm64-v8a/`. Without them the APK still builds;
+choosing OpenGL then fails at boot with "Failed to load Mesa" in the log.
+
+How it runs (`src/android/app/src/main/jni/emu_window/gl_context.cpp`):
+
+- Zink uses the Vulkan driver Eden already loaded (system or custom through adrenotools); the
+  patch takes its entry points from `EDEN_ZINK_VK_GIPA`/`EDEN_ZINK_VK_GDPA` instead of opening
+  `libvulkan.so`. Mesa reads them once per process, so after changing the custom driver restart
+  the app before using OpenGL again.
+- Apps cannot open a DRM device, so the display is `EGL_PLATFORM_SURFACELESS_MESA` (the patch
+  lets Zink start there without one). The context that composites renders into a pbuffer the size
+  of the window; each frame is read into one of two pixel pack buffers and the previous one is
+  copied to the `ANativeWindow` by the CPU. This costs one frame of latency and a copy of the
+  window per frame: the backend is for compatibility checks and comparisons with Vulkan, not
+  speed. Shader workers get their own contexts that share objects with it.
+- The renderer needs OpenGL 4.6. Zink reaches it on Turnip; with a driver that lacks the needed
+  Vulkan features the boot fails with "OpenGL 4.6 is not available".
+
+The backend is chosen in Settings, Debug, API. Diagnostic captures record the OpenGL version,
+vendor and renderer in the `opengl_device` section, and host frame intervals as with Vulkan;
+figures that only the Vulkan renderer records (GPU timestamps, render passes, wait-for-idle,
+pipeline timers) stay empty for OpenGL sessions.
+
 ### Additional Resources
 
 <https://developer.android.com/studio/intro>
