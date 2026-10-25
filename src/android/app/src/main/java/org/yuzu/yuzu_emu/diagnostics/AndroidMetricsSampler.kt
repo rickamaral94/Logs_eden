@@ -49,6 +49,22 @@ class AndroidMetricsSampler(
     private var previousGc = readGcStats()
     private var sampleCount = 0L
 
+    // Files that failed once are not read again (each failure throws, every sample).
+    private val unreadable = mutableSetOf<String>()
+
+    // One scaling_cur_freq per frequency domain instead of one per core.
+    private val cpuCount = Runtime.getRuntime().availableProcessors()
+    private val cpuPolicies: List<Pair<String, List<Int>>> = File(CPUFREQ_DIR)
+        .listFiles { file -> file.name.startsWith("policy") }
+        ?.mapNotNull { dir ->
+            val cpus = runCatching {
+                ProcParsers.parseCpuList(dir.resolve("related_cpus").readText())
+            }.getOrNull()
+            cpus?.takeIf { it.isNotEmpty() }?.let { dir.resolve("scaling_cur_freq").path to it }
+        }
+        .orEmpty()
+    private var batteryTempC: Double? = null
+
     fun sample(): JsonObject {
         val start = SystemClock.elapsedRealtimeNanos()
         val availability = mutableMapOf<String, String>()
@@ -215,8 +231,9 @@ class AndroidMetricsSampler(
         availability.record("thermal_headroom", headroom, "not reported")
         val cpuFreq = readCpuFrequenciesMhz()
         availability.record("cpu_freq", cpuFreq.firstOrNull { it != null }, "cpufreq not readable")
-        val gpuBusy = runCatching { ProcParsers.parseKgslBusyPercent(File(KGSL_BUSY).readText()) }
-            .getOrNull()
+        val gpuBusy = readText(KGSL_BUSY)?.let {
+            runCatching { ProcParsers.parseKgslBusyPercent(it) }.getOrNull()
+        }
         val gpuClock = readLong(KGSL_CLOCK)?.div(1_000_000L)
         // The governor's current limits tell a capped clock apart from a low requested one.
         val gpuMaxClock = readLong(KGSL_MAX_CLOCK)?.div(1_000_000L)
@@ -264,15 +281,28 @@ class AndroidMetricsSampler(
     }
 
     private fun readCpuFrequenciesMhz(): List<Long?> {
-        val cores = Runtime.getRuntime().availableProcessors()
-        return (0 until cores).map {
-            readLong(
-                "/sys/devices/system/cpu/cpu$it/cpufreq/scaling_cur_freq"
-            )?.div(1000L)
+        if (cpuPolicies.isNotEmpty()) {
+            val perCore = arrayOfNulls<Long>(cpuCount)
+            cpuPolicies.forEach { (path, cpus) ->
+                val mhz = readLong(path)?.div(1000L)
+                cpus.filter { it in 0 until cpuCount }.forEach { perCore[it] = mhz }
+            }
+            return perCore.toList()
+        }
+        return (0 until cpuCount).map {
+            readLong("/sys/devices/system/cpu/cpu$it/cpufreq/scaling_cur_freq")?.div(1000L)
         }
     }
 
+    // The sticky battery intent is a binder call; the temperature moves slowly.
     private fun readBatteryTemperature(): Double? {
+        if (sampleCount % BATTERY_SAMPLE_EVERY == 0L || batteryTempC == null) {
+            batteryTempC = readBatteryTemperatureNow()
+        }
+        return batteryTempC
+    }
+
+    private fun readBatteryTemperatureNow(): Double? {
         val intent = runCatching {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         }.getOrNull() ?: return null
@@ -280,11 +310,19 @@ class AndroidMetricsSampler(
         return if (tenths == Int.MIN_VALUE) null else tenths / 10.0
     }
 
-    private fun readLong(path: String): Long? =
-        runCatching { File(path).readText().trim().toLong() }.getOrNull()
+    private fun readLong(path: String): Long? = readText(path)?.trim()?.toLongOrNull()
+
+    private fun readText(path: String): String? {
+        if (path in unreadable) return null
+        return runCatching { File(path).readText() }
+            .onFailure { unreadable += path }
+            .getOrNull()
+    }
 
     companion object {
         private const val PSS_SAMPLE_EVERY = 10L
+        private const val BATTERY_SAMPLE_EVERY = 5L
+        private const val CPUFREQ_DIR = "/sys/devices/system/cpu/cpufreq"
         private const val KGSL_BUSY = "/sys/class/kgsl/kgsl-3d0/gpubusy"
         private const val KGSL_CLOCK = "/sys/class/kgsl/kgsl-3d0/gpuclk"
         private const val KGSL_MAX_CLOCK = "/sys/class/kgsl/kgsl-3d0/max_gpuclk"
@@ -373,7 +411,12 @@ class AndroidMetricsSampler(
                 "PowerManager.getThermalHeadroom(0)",
                 "1.0 = severe throttling threshold"
             )
-            def("system.battery_temp_c", "°C", "system", "ACTION_BATTERY_CHANGED")
+            def(
+                "system.battery_temp_c",
+                "°C",
+                "system",
+                "ACTION_BATTERY_CHANGED, refreshed every $BATTERY_SAMPLE_EVERY samples"
+            )
             def("system.cpu_freq_mhz", "MHz", "system", "cpufreq scaling_cur_freq")
             def(
                 "system.gpu_busy_pct_kgsl",

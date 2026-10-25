@@ -211,6 +211,8 @@ constexpr std::array<std::string_view, CounterCount> COUNTER_NAMES{
     "compute_dispatches",            "render_passes",
     "staging_upload_bytes",          "staging_download_bytes",
     "pipeline_feedback_valid",       "driver_pipeline_cache_hits",
+    "guest_wait_for_idle",           "guest_wait_for_idle_elided",
+    "preemptive_image_download_bytes",
 };
 
 constexpr size_t WaitReasonCount = static_cast<size_t>(WaitReason::Count);
@@ -694,6 +696,8 @@ FrameLog::Values FrameTotals(State& state) {
     }
     values[Index::QueueSubmitUs] = timer_us(Timer::QueueSubmit);
     values[Index::FramePacingThrottleUs] = timer_us(Timer::FramePacingThrottle);
+    values[Index::WaitForIdle] = counter(Counter::GuestWaitForIdle);
+    values[Index::WaitForIdleElided] = counter(Counter::GuestWaitForIdleElided);
     return values;
 }
 

@@ -96,6 +96,12 @@ public:
         return fragment_has_color0_output;
     }
 
+    /// True when a stage writes storage buffers, images or global memory, or uses atomics:
+    /// work a guest wait-for-idle has to order.
+    [[nodiscard]] bool WritesMemory() const noexcept {
+        return writes_memory;
+    }
+
     bool UsesExtendedDynamicState() const noexcept {
         return key.state.extended_dynamic_state != 0;
     }
@@ -170,6 +176,7 @@ private:
     size_t num_image_elements{};
     u32 num_textures{};
     bool fragment_has_color0_output{};
+    bool writes_memory{};
 
     vk::DescriptorSetLayout descriptor_set_layout;
     DescriptorAllocator descriptor_allocator;

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <span>
@@ -44,7 +45,9 @@ inline constexpr size_t WaitReasons = 10; ///< Diagnostics::WaitReason::Count
 inline constexpr size_t WaitByReasonUs = FenceWaitUs + 1;
 inline constexpr size_t QueueSubmitUs = WaitByReasonUs + WaitReasons;
 inline constexpr size_t FramePacingThrottleUs = QueueSubmitUs + 1;
-inline constexpr size_t Count = FramePacingThrottleUs + 1;
+inline constexpr size_t WaitForIdle = FramePacingThrottleUs + 1;
+inline constexpr size_t WaitForIdleElided = WaitForIdle + 1;
+inline constexpr size_t Count = WaitForIdleElided + 1;
 } // namespace Index
 
 inline constexpr size_t ValueCount = Index::Count;
@@ -110,7 +113,7 @@ private:
     u64 gpu_partial{};
     u64 gpu_missing{};
     u64 gpu_late{};
-    u64 cost_ns{};
+    std::atomic<u64> cost_ns{};
 };
 
 [[nodiscard]] Log& Global();

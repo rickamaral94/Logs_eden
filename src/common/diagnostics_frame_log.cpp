@@ -60,6 +60,8 @@ struct Columns {
         }
         values[Index::QueueSubmitUs] = "queue_submit_us";
         values[Index::FramePacingThrottleUs] = "frame_pacing_throttle_us";
+        values[Index::WaitForIdle] = "wait_for_idle";
+        values[Index::WaitForIdleElided] = "wait_for_idle_elided";
         for (auto& value : values) {
             storage.push_back(std::move(value));
         }
@@ -100,7 +102,7 @@ void Log::Reset() {
     gpu_partial = 0;
     gpu_missing = 0;
     gpu_late = 0;
-    cost_ns = 0;
+    cost_ns.store(0, std::memory_order_relaxed);
 }
 
 void Log::OnFrame(u64 frame_id, s64 end_mono_us, bool across_pause, const Values& totals) {
@@ -155,8 +157,7 @@ void Log::SetGpu(u64 frame_id, u32 us, bool complete) {
 }
 
 void Log::AddCost(u64 ns) {
-    std::scoped_lock lock{mutex};
-    cost_ns += ns;
+    cost_ns.fetch_add(ns, std::memory_order_relaxed);
 }
 
 bool Log::Ready(const Record& record, u64 current_frame) const {
@@ -219,6 +220,7 @@ std::string Log::Drain(u64 current_frame, bool all) {
 std::string Log::SessionJson() const {
     std::scoped_lock lock{mutex};
     const u64 judged = gpu_complete + gpu_partial + gpu_missing;
+    const u64 cost = cost_ns.load(std::memory_order_relaxed);
     return json{
         {"frames_recorded", recorded},
         {"frames_drained", drained},
@@ -232,9 +234,9 @@ std::string Log::SessionJson() const {
         {"gpu_coverage_pct",
          judged != 0 ? 100.0 * static_cast<double>(gpu_complete) / static_cast<double>(judged)
                      : 0.0},
-        {"instrumentation_cpu_us", cost_ns / 1000},
+        {"instrumentation_cpu_us", cost / 1000},
         {"instrumentation_cpu_us_per_frame",
-         recorded != 0 ? static_cast<double>(cost_ns) / 1000.0 / static_cast<double>(recorded)
+         recorded != 0 ? static_cast<double>(cost) / 1000.0 / static_cast<double>(recorded)
                        : 0.0},
     }
         .dump();

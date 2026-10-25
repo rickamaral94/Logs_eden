@@ -303,6 +303,11 @@ void Scheduler::RequestRenderpass(const Framebuffer* framebuffer) {
 }
 
 void Scheduler::RequestOutsideRenderPassOperationContext(RenderPassEnd reason) {
+    // Copies, clears, dispatches, queries and barriers may write memory a later
+    // wait-for-idle must order; only the wait-for-idle itself does not.
+    if (reason != RenderPassEnd::Sync) {
+        wfi_hazard = true;
+    }
     EndRenderPass(reason);
 }
 

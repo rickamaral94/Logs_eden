@@ -75,4 +75,13 @@ class ProcParsersTest {
         val reused = ProcParsers.parseNativeThreadStats("4567 99999 3 1\tother\n").single()
         assertTrue(reused.key != stats[0].key)
     }
+
+    @Test
+    fun cpuListsInBothSysfsFormats() {
+        assertEquals(listOf(0, 1, 2), ProcParsers.parseCpuList("0 1 2\n"))
+        assertEquals(listOf(0, 1, 2, 3, 7), ProcParsers.parseCpuList("0-3,7"))
+        assertEquals(listOf(5), ProcParsers.parseCpuList("5"))
+        assertEquals(emptyList<Int>(), ProcParsers.parseCpuList("3-1"))
+        assertEquals(emptyList<Int>(), ProcParsers.parseCpuList("x"))
+    }
 }

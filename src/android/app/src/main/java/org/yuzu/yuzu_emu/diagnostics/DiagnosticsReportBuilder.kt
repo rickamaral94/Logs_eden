@@ -905,7 +905,10 @@ class DiagnosticsReportBuilder(
             "compute_dispatches",
             "render_passes",
             "staging_upload_bytes",
-            "staging_download_bytes"
+            "staging_download_bytes",
+            "guest_wait_for_idle",
+            "guest_wait_for_idle_elided",
+            "preemptive_image_download_bytes"
         )
         if (names.none { counters.containsKey(it) }) {
             return unavailable("not recorded by this build")
@@ -1505,6 +1508,8 @@ class DiagnosticsReportBuilder(
             put("swapchain_height", swapchain?.get("height") ?: JsonNull)
             put("present_mode", swapchain?.get("present_mode") ?: JsonNull)
             put("force_max_clock", setting("renderer_force_max_clock") ?: JsonNull)
+            put("use_reactive_flushing", setting("use_reactive_flushing") ?: JsonNull)
+            put("elide_wait_for_idle", setting("elide_wait_for_idle") ?: JsonNull)
             put(
                 "game_program_id",
                 report["game"]?.asObject()?.get("frontend")?.asObject()?.get("program_id")

@@ -231,6 +231,8 @@ object SceneAnalysis {
         "pipeline_build_wait_us",
         "draws_skipped_pipeline_pending",
         "fence_wait_us",
+        "wait_for_idle",
+        "wait_for_idle_elided",
         "queue_submit_us",
         "upload_bytes",
         "download_bytes"

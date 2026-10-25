@@ -4,9 +4,11 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/common_types.h"
@@ -156,6 +158,12 @@ private:
     u64 last_target{};
     EndReason last_end{EndReason::Unknown};
     bool have_last{};
+    // Shapes already registered, so Begin locks only for a new shape. Cleared when Reset
+    // bumps the generation.
+    std::unordered_set<ShapeKey, ShapeKeyHash> known_shapes;
+    u64 seen_generation{};
+    bool table_full{};
+    std::atomic<u64> generation{};
 
     mutable std::mutex mutex;
     Counts window;

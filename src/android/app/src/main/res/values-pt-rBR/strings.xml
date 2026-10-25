@@ -448,6 +448,8 @@
     <string name="renderer_force_max_clock_description">Força a GPU a rodar na velocidade máxima (restrições térmicas serão aplicadas)</string>
     <string name="renderer_reactive_flushing">Usar flushing reativo</string>
     <string name="renderer_reactive_flushing_description">Melhora a precisão da renderização em alguns jogos ao custo de desempenho.</string>
+    <string name="renderer_elide_wait_for_idle">Pular esperas de GPU desnecessárias</string>
+    <string name="renderer_elide_wait_for_idle_description">Pula a barreira de um wait-for-idle do jogo quando nenhuma escrita de memória ocorreu desde o anterior, mantendo o render pass aberto. Menos quebras de render pass em GPUs tiled (Adreno, Mali). Desative se um jogo mostrar efeitos faltando ou desatualizados.</string>
     <string name="hacks">Hacks</string>
 
     <string name="skip_cpu_inner_invalidation">Ignorar Invalidação Interna da CPU</string>

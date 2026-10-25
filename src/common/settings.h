@@ -613,6 +613,11 @@ struct Values {
     SwitchableSetting<bool> barrier_feedback_loops{linkage, true, "barrier_feedback_loops",
                                                    Category::RendererAdvanced};
 
+    /// Skips the barrier of a guest wait-for-idle (and keeps the render pass open) when no
+    /// storage, image, transform feedback or transfer write happened since the previous one.
+    SwitchableSetting<bool> elide_wait_for_idle{linkage, true, "elide_wait_for_idle",
+                                                Category::RendererAdvanced};
+
     SwitchableSetting<bool> enable_buffer_history{linkage,
                                                   false,
                                                   "enable_buffer_history",

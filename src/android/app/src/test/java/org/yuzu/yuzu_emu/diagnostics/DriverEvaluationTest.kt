@@ -115,6 +115,33 @@ class DriverEvaluationTest {
     }
 
     @Test
+    fun idleWaitsAndPreemptiveDownloadsAreObserved() {
+        val eval = DriverEvaluation.build(
+            Json.parseToJsonElement(
+                """{"workload":{"per_host_frame":{"guest_wait_for_idle":26.0,
+                     "guest_wait_for_idle_elided":13.0,
+                     "preemptive_image_download_bytes":8294400.0}},
+                   "settings":[{"name":"use_reactive_flushing","value":"false"},
+                               {"name":"elide_wait_for_idle","value":"true"}]}"""
+            ).jsonObject
+        )
+        val texts = (eval["observations"] as JsonArray).associate {
+            it.jsonObject["id"]!!.jsonPrimitive.content to
+                it.jsonObject["text"]!!.jsonPrimitive.content
+        }
+        assertEquals(
+            "26.0 guest wait-for-idle per frame, 50% without a barrier",
+            texts["guest_wait_for_idle"]
+        )
+        assertTrue(texts["preemptive_image_downloads"]!!.startsWith("7.9 MiB"))
+        assertTrue(
+            (eval["hypotheses"] as JsonArray).any {
+                it.jsonObject["id"]!!.jsonPrimitive.content == "preemptive_downloads_cost"
+            }
+        )
+    }
+
+    @Test
     fun missingSectionsAreReportedNotGuessed() {
         val eval = DriverEvaluation.build(Json.parseToJsonElement("{}").jsonObject)
         assertEquals(

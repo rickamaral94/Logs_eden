@@ -55,6 +55,9 @@ enum class Counter : u32 {
     StagingDownloadBytes,       ///< Bytes requested from the staging pool for downloads.
     PipelineFeedbackValid,      ///< Runtime pipeline creations with valid creation feedback.
     DriverPipelineCacheHits,    ///< ...of which the driver reported an application cache hit.
+    GuestWaitForIdle,           ///< Guest wait-for-idle commands (3D engine and pushbuffer).
+    GuestWaitForIdleElided,     ///< ...whose barrier was skipped: nothing to order.
+    PreemptiveImageDownloadBytes, ///< Render target downloads queued without a CPU access.
     Count,
 };
 

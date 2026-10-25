@@ -293,6 +293,36 @@ end; it says nothing about its cost.
 Buffer downloads (buffer cache readbacks) go through a scheduler finish, so they appear as
 `submit` plus `buffer_download` fence waits rather than as `readback`.
 
+## Guest wait-for-idle and preemptive downloads
+
+Two emulator-side costs that the Adreno 840 captures (Marvel Ultimate Alliance 3) made visible:
+
+- **Wait-for-idle.** The guest issues wait-for-idle from the 3D engine (`wait_for_idle`,
+  `invalidate_texture_data_cache`) and the pushbuffer. Eden, like yuzu and its other forks,
+  turned each one into `vkCmdSetEvent` + `vkCmdWaitEvents` outside a render pass. On Turnip
+  that is a render pass split (attachment store and reload in GMEM), a cache flush and a
+  pipeline drain. The captured scene ended 25.7 of its 35.7 render passes per frame this way.
+  The barrier orders shader storage, image and global memory writes, transform feedback and
+  transfers; it does not order attachment writes (its stages exclude color output and
+  fragment tests). With `elide_wait_for_idle` (on by default, per game, Renderer advanced),
+  the scheduler notes those writes: any operation outside a render pass
+  (`RequestOutsideRenderPassOperationContext`, except the wait itself) and any draw whose
+  pipeline writes storage buffers, images or global memory or uses atomics. A wait with nothing
+  noted since the previous barrier records no barrier and keeps the render pass open; query
+  synchronization and fence ordering still run. Counters `guest_wait_for_idle` and
+  `guest_wait_for_idle_elided` (also per frame: `wait_for_idle`, `wait_for_idle_elided`) show
+  how often it applies. For comparison, Ryujinx records its wait-for-idle barrier inside the
+  render pass, at most once per run of draws, with a subpass self-dependency; on Turnip a
+  vertex-stage barrier inside a pass moves the whole pass to sysmem, so Eden skips the barrier
+  only when it orders nothing instead.
+- **Preemptive render target downloads.** With `use_reactive_flushing` off (the Android
+  default), pitch linear images are downloaded to guest memory every time they are rendered
+  to, because the CPU's reads are not trapped. The capture downloaded about 8.3 MB per frame (a
+  1080p RGBA8 image). `preemptive_image_download_bytes` counts these bytes; the driver
+  evaluation reports more than 1 MiB per frame as an observation and suggests an AB/BA run with
+  reactive flushing on for that game. The default is not changed: games differ in which way is
+  faster and which renders correctly.
+
 ## Scenes and per host frame records
 
 Totals over a capture cannot say which operation split which pass in a slow frame. Two
@@ -584,3 +614,4 @@ confirmed or revised with five AB/BA pairs per level on the reference device.
 | 2 (additive) | `render_passes` (samples and native summary), `render_passes` in `hitches`, `driver_evaluation` and `driver_evaluation.json`, `log_coverage.collapsed_repeated_lines`; repeated log lines collapsed in `logs/eden_log.txt` (`log_digest` still counts every occurrence) |
 | 2 | `ended_by`/`same_target_reopen_after` reasons: `outside_operation` split into `clear`, `copy`, `readback`, `blit`, `dispatch`, `eden_compute`, `query`, `barrier`, `transform_feedback`, `present`, `sync`, `other`; `deferred_clear` renamed `clear`; undeclared ends are `unknown`; all reasons always listed |
 | 2 (additive) | `scene_marker` events, `scene_markers`, `scenes`, `frame_log`, `comparison_key`, `frames.jsonl`, `native_summary.frame_log`, session `frames` and `scenes` |
+| 2 (additive) | counters `guest_wait_for_idle`, `guest_wait_for_idle_elided`, `preemptive_image_download_bytes`; frame columns `wait_for_idle`, `wait_for_idle_elided`; `comparison_key` adds `use_reactive_flushing` and `elide_wait_for_idle`; battery temperature refreshed every 5 samples; CPU frequency read once per frequency domain |

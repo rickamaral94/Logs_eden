@@ -73,6 +73,7 @@ size_t Profiler::ShapeKeyHash::operator()(const ShapeKey& key) const noexcept {
 
 void Profiler::Reset() {
     std::scoped_lock lock{mutex};
+    generation.fetch_add(1, std::memory_order_release);
     window = {};
     session = {};
     frame = {};
@@ -94,12 +95,23 @@ bool Profiler::Begin(const PassInfo& info, u64 frame_id) {
     current_draws = 0;
     current_frame = frame_id;
 
-    std::scoped_lock lock{mutex};
+    const u64 current_generation = generation.load(std::memory_order_acquire);
+    if (current_generation != seen_generation) {
+        known_shapes.clear();
+        table_full = false;
+        seen_generation = current_generation;
+    }
     const ShapeKey key{info.render_pass, info.width, info.height};
+    if (table_full || known_shapes.contains(key)) {
+        return false;
+    }
+    std::scoped_lock lock{mutex};
+    known_shapes.insert(key);
     if (shapes.contains(key)) {
         return false;
     }
     if (shapes.size() >= MaxShapes) {
+        table_full = true;
         return false;
     }
     shapes[key].samples = info.samples;

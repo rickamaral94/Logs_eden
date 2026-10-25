@@ -582,6 +582,8 @@
     <string name="renderer_asynchronous_gpu_emulation_description">This hack can increase performance by running GPU emulation asynchronously at the cost of graphical issues and increased crash rates by timing-related operations.</string>
     <string name="renderer_reactive_flushing">Use reactive flushing</string>
     <string name="renderer_reactive_flushing_description">Improves rendering accuracy in some games at the cost of performance.</string>
+    <string name="renderer_elide_wait_for_idle">Skip unneeded GPU idle waits</string>
+    <string name="renderer_elide_wait_for_idle_description">Skips the barrier of a game\'s wait-for-idle when no memory write happened since the previous one, keeping the render pass open. Fewer render pass breaks on tiled GPUs (Adreno, Mali). Disable if a game shows missing or stale effects.</string>
     <string name="enable_buffer_history">Enable buffer history</string>
     <string name="enable_buffer_history_description">Enables access to previous buffer states. This option may improve rendering quality and performance consistency in some games.</string>
     <string name="use_optimized_vertex_buffers">Optimized Vertex Buffers</string>

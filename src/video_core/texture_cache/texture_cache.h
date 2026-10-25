@@ -13,6 +13,7 @@
 #include <boost/container/small_vector.hpp>
 
 #include "common/alignment.h"
+#include "common/session_diagnostics.h"
 #include "common/settings.h"
 #include "common/slot_vector.h"
 #include "video_core/control/channel_state.h"
@@ -889,6 +890,10 @@ void TextureCache<P>::CommitAsyncFlushes() {
         }
 
         if (any_none_dma) {
+            // Render targets downloaded because reactive flushing is off (pitch linear images
+            // are flushed preemptively whenever they are rendered to).
+            Common::Diagnostics::Increment(
+                Common::Diagnostics::Counter::PreemptiveImageDownloadBytes, total_size_bytes);
             auto download_map = runtime.DownloadStagingBuffer(total_size_bytes, true);
             for (const PendingDownload& download_info : download_ids) {
                 if (download_info.is_swizzle) {

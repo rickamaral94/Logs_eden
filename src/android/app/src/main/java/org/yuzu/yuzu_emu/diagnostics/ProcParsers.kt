@@ -128,4 +128,16 @@ object ProcParsers {
         "nvnflinger", "nvservices", "olsc", "omm", "pcie", "pctl", "pcv", "prepo", "psc", "ptm",
         "ro", "settings", "sm", "spl", "ssl", "tma", "usb", "wlan"
     )
+
+    /** CPU list as sysfs prints it ("0 1 2", "0-3,7") to CPU indices; empty when malformed. */
+    fun parseCpuList(text: String): List<Int> = text.trim().split(CPU_LIST_SEPARATOR).flatMap {
+            part ->
+        val range = part.split('-')
+        val first = range[0].toIntOrNull() ?: return emptyList()
+        val last = range.getOrNull(1)?.toIntOrNull() ?: first
+        if (range.size > 2 || last < first) return emptyList()
+        (first..last).toList()
+    }
+
+    private val CPU_LIST_SEPARATOR = Regex("[,\\s]+")
 }

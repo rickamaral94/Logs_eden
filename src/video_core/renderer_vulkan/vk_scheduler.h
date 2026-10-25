@@ -78,6 +78,18 @@ public:
     /// of a renderpass. The reason classifies the render pass end in the diagnostics profile.
     void RequestOutsideRenderPassOperationContext(RenderPassEnd reason = RenderPassEnd::Unknown);
 
+    /// Notes recorded work whose memory writes a guest wait-for-idle has to order: shader
+    /// storage, image or global memory writes. Operations outside a render pass are noted by
+    /// RequestOutsideRenderPassOperationContext.
+    void NoteMemoryHazard() noexcept {
+        wfi_hazard = true;
+    }
+
+    /// Whether anything a wait-for-idle barrier orders was recorded since the last call.
+    [[nodiscard]] bool TakeWaitForIdleHazard() noexcept {
+        return std::exchange(wfi_hazard, false);
+    }
+
     /// Returns true when a render pass is currently active in the scheduler state.
     bool IsRenderPassActive() const {
         return state.renderpass != VK_NULL_HANDLE;
@@ -317,6 +329,7 @@ private:
     vk::CommandBuffer current_upload_cmdbuf;
 
     DeferredClear deferred_clear;
+    bool wfi_hazard = true;
 
     std::unique_ptr<CommandChunk> chunk;
     std::function<void()> on_submit;

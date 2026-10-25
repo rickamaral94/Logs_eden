@@ -147,6 +147,21 @@ TEST_CASE("RenderPasses: every end reason has a distinct name and totals keep th
     REQUIRE(session["ended_by"]["unknown"] == 1);
 }
 
+TEST_CASE("RenderPasses: shapes are registered again after a reset", "[common]") {
+    Profiler profiler;
+    REQUIRE(profiler.Begin(Pass(7, 7), 1));
+    profiler.End(EndReason::Submit);
+    REQUIRE_FALSE(profiler.Begin(Pass(7, 7), 1)); // known: no lock, no new entry
+    profiler.End(EndReason::Submit);
+    profiler.Reset();
+    REQUIRE(profiler.Begin(Pass(7, 7), 1)); // new capture: described again
+    profiler.Describe(Pass(7, 7), "again");
+    profiler.End(EndReason::Submit);
+    const json session = json::parse(profiler.SessionJson());
+    REQUIRE(session["shapes"]["top"][0]["description"] == "again");
+    REQUIRE(session["shapes"]["top"][0]["passes"] == 1);
+}
+
 TEST_CASE("RenderPasses: a draw outside a pass is not counted", "[common]") {
     Profiler profiler;
     profiler.NoteDraw();

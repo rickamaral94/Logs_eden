@@ -39,7 +39,8 @@ object DriverEvaluation {
     private val DRIVER_TAG = Regex("(?i)turnip|^tu$|mesa|freedreno|vulkan|adreno|kgsl|ir3|^fd")
     private val DRIVER_SETTING = Regex(
         "(?i)vulkan|driver|clock|async|dyna|vertex_input|accuracy|astc|shader|resolution|" +
-            "msaa|aniso|vsync|present|descriptor|turbo|sync|backend|frame_?skip|fsr|filter"
+            "msaa|aniso|vsync|present|descriptor|turbo|sync|backend|frame_?skip|fsr|filter|" +
+            "idle|flush"
     )
 
     fun categorize(message: String): String =
@@ -60,6 +61,7 @@ object DriverEvaluation {
         val messages = messageSection(report, observations, hypotheses)
         val workarounds = workaroundSection(vkDevice)
         val errors = errorSection(report, observations)
+        emulationObservations(report, observations, hypotheses)
 
         return buildJsonObject {
             put("format_version", FORMAT_VERSION)
@@ -419,6 +421,58 @@ object DriverEvaluation {
                 "note",
                 "categorized from the most frequent distinct messages of driver_log; Turnip " +
                     "only reports performance fallbacks with TU_DEBUG=perf"
+            )
+        }
+    }
+
+    /** Emulator-side work the driver is given: guest idle waits and preemptive downloads. */
+    private fun emulationObservations(
+        report: JsonObject,
+        observations: MutableList<JsonObject>,
+        hypotheses: MutableList<JsonObject>
+    ) {
+        val perFrame = report["workload"]?.asObject()?.get("per_host_frame")?.asObject()
+        val settings = (report["settings"] as? JsonArray).orEmpty().mapNotNull { it.asObject() }
+        fun setting(name: String) = settings.firstOrNull { it.str("name") == name }?.str("value")
+        val wfi = perFrame.num("guest_wait_for_idle")
+        val elided = perFrame.num("guest_wait_for_idle_elided")
+        if (wfi != null && wfi >= 1.0) {
+            observations += observation(
+                "guest_wait_for_idle",
+                String.format(
+                    Locale.ROOT,
+                    "%.1f guest wait-for-idle per frame, %.0f%% without a barrier",
+                    wfi,
+                    pct(elided ?: 0.0, wfi) ?: 0.0
+                ),
+                buildJsonObject {
+                    put("per_frame", wfi)
+                    put("elided_per_frame", elided)
+                    put("elide_wait_for_idle", setting("elide_wait_for_idle"))
+                }
+            )
+        }
+        val preemptive = perFrame.num("preemptive_image_download_bytes")
+        if (preemptive != null && preemptive >= 1024.0 * 1024.0) {
+            observations += observation(
+                "preemptive_image_downloads",
+                String.format(
+                    Locale.ROOT,
+                    "%.1f MiB of render targets downloaded to the CPU per frame without a CPU " +
+                        "access (reactive flushing %s)",
+                    preemptive / 1024.0 / 1024.0,
+                    setting("use_reactive_flushing") ?: "?"
+                ),
+                buildJsonObject {
+                    put("bytes_per_frame", preemptive)
+                    put("use_reactive_flushing", setting("use_reactive_flushing"))
+                }
+            )
+            hypotheses += hypothesis(
+                "preemptive_downloads_cost",
+                "the per-frame render target downloads cost GPU, bus and CPU time in this game",
+                "AB/BA of the same scene with use_reactive_flushing on and off (per game); " +
+                    "check that nothing renders wrong with it on"
             )
         }
     }

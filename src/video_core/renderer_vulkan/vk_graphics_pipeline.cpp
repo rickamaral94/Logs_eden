@@ -246,6 +246,20 @@ ConfigureFuncPtr ConfigureFunc(const std::array<vk::ShaderModule, NUM_STAGES>& m
     return FindSpec<SimpleVertexSpec, SimpleVertexFragmentSpec, SimpleStorageSpec, SimpleImageSpec,
                     DefaultSpec>(modules, infos);
 }
+// Conservative: atomics are counted as writes whatever memory they target.
+bool StageWritesMemory(const Shader::Info& info) {
+    const auto written = [](const auto& descriptors) {
+        return std::ranges::any_of(descriptors, [](const auto& desc) { return desc.is_written; });
+    };
+    return written(info.storage_buffers_descriptors) || written(info.image_descriptors) ||
+           written(info.image_buffer_descriptors) || info.stores_global_memory ||
+           info.uses_global_increment || info.uses_global_decrement ||
+           info.uses_atomic_f32_add || info.uses_atomic_f16x2_add || info.uses_atomic_f16x2_min ||
+           info.uses_atomic_f16x2_max || info.uses_atomic_f32x2_add ||
+           info.uses_atomic_f32x2_min || info.uses_atomic_f32x2_max || info.uses_atomic_s32_min ||
+           info.uses_atomic_s32_max || info.uses_int64_bit_atomics || info.uses_atomic_image_u32;
+}
+
 } // Anonymous namespace
 
 // TODO(crueter): This is the worst-formatted code I have EVER seen
@@ -279,6 +293,7 @@ GraphicsPipeline::GraphicsPipeline(
         num_image_elements += Shader::NumDescriptors(info->texture_descriptors);
         num_image_elements += Shader::NumDescriptors(info->image_descriptors);
         num_descriptor_entries += NumDescriptorEntries(*info);
+        writes_memory |= StageWritesMemory(*info);
     }
     fragment_has_color0_output = stage_infos[NUM_STAGES - 1].stores_frag_color[0];
 

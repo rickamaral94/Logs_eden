@@ -263,6 +263,9 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
         Common::Diagnostics::Increment(Common::Diagnostics::Counter::IndexedDrawCalls);
     }
     Common::Diagnostics::RenderPasses::Global().NoteDraw();
+    if (pipeline->WritesMemory()) {
+        scheduler.NoteMemoryHazard();
+    }
     draw_func();
 }
 
@@ -873,7 +876,17 @@ void RasterizerVulkan::WaitForIdle() {
     }
 
     query_cache.NotifyWFI();
+    Common::Diagnostics::Increment(Common::Diagnostics::Counter::GuestWaitForIdle);
 
+    // The barrier below orders shader storage/image writes, transform feedback and transfers,
+    // not attachment writes. Without any of those since the previous one it orders nothing, so
+    // the render pass is kept instead of being closed and reopened (a load and store of every
+    // attachment on tiled GPUs).
+    if (!scheduler.TakeWaitForIdleHazard() && Settings::values.elide_wait_for_idle.GetValue()) {
+        Common::Diagnostics::Increment(Common::Diagnostics::Counter::GuestWaitForIdleElided);
+        fence_manager.SignalOrdering();
+        return;
+    }
     scheduler.RequestOutsideRenderPassOperationContext(RenderPassEnd::Sync);
     scheduler.Record([event = *wfi_event, flags](vk::CommandBuffer cmdbuf) {
         cmdbuf.SetEvent(event, flags);

@@ -93,6 +93,14 @@ game:
 Use the same name for the same scene in every run, and start and end it at the same places
 (a door, a checkpoint, a camera cut).
 
+## Settings worth an AB/BA test
+
+- **Skip unneeded GPU idle waits** (Renderer, advanced; on by default). Keeps render passes
+  open across a game's idle waits when nothing has to be synchronized. If a game shows missing
+  or stale effects, turn it off for that game and report it with a capture.
+- **Use reactive flushing.** When the driver evaluation reports render targets downloaded
+  every frame, compare the same scene with it on and off for that game.
+
 ## Comparing two drivers or builds
 
 To compare driver A with driver B on the same scene:
