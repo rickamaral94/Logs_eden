@@ -20,6 +20,7 @@
 #include "input_common/drivers/virtual_amiibo.h"
 #include "input_common/drivers/virtual_gamepad.h"
 #include "input_common/main.h"
+#include "jni/android_settings.h"
 #include "jni/emu_window/emu_window.h"
 #include "jni/emu_window/gl_context.h"
 #include "jni/native.h"
@@ -52,6 +53,14 @@ void EmuWindow_Android::OnSurfaceChanged(ANativeWindow* surface) {
 std::unique_ptr<Core::Frontend::GraphicsContext> EmuWindow_Android::CreateSharedContext() const {
     if (Settings::IsOpenGL()) {
         const bool presenter = m_gl_share_context == nullptr;
+        if (AndroidSettings::values.opengl_driver.GetValue() == 1) {
+            auto context = std::make_unique<AndroidGL::EsContext>(*this, m_gl_share_context,
+                                                                  presenter);
+            if (presenter) {
+                m_gl_share_context = context->Handle();
+            }
+            return context;
+        }
         auto context = std::make_unique<AndroidGL::Context>(*this, m_gl_share_context, presenter,
                                                             m_driver_library);
         if (presenter) {

@@ -53,6 +53,10 @@ namespace AndroidSettings {
 
         Settings::SwitchableSetting<std::string, false> driver_path{linkage, "", "driver_path",
                                                                     Settings::Category::GpuDriver};
+        // OpenGL backend driver: 0 = desktop OpenGL through Mesa Zink, 1 = the system's
+        // OpenGL ES 3.2 driver.
+        Settings::Setting<s32> opengl_driver{linkage, 0, "opengl_driver",
+                                             Settings::Category::Android};
 
         Settings::Setting<s32> theme{linkage, 0, "theme", Settings::Category::Android};
         Settings::Setting<s32> theme_mode{linkage, -1, "theme_mode", Settings::Category::Android};

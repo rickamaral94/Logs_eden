@@ -689,6 +689,9 @@ GLAPI struct gladGLversionStruct GLVersion;
 GLAPI int gladLoadGL(void);
 
 GLAPI int gladLoadGLLoader(GLADloadproc);
+/* Eden: loads the entry points of every core version up to 4.6 by name, whatever the context
+ * version. OpenGL ES 3.2 provides many of them under the same names. */
+GLAPI void gladLoadGLAllCoreLoader(GLADloadproc);
 
 #include <KHR/khrplatform.h>
 typedef unsigned int GLenum;

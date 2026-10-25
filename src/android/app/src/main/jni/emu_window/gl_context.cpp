@@ -18,6 +18,7 @@
 #include "common/logging.h"
 #include "core/frontend/emu_window.h"
 #include "jni/emu_window/gl_context.h"
+#include "video_core/renderer_opengl/gl_es_compat.h"
 
 namespace AndroidGL {
 
@@ -200,7 +201,7 @@ void Context::MakeCurrent() {
     }
     static std::once_flag glad_flag;
     std::call_once(glad_flag, [] {
-        if (!gladLoadGLLoader(GetGLProcAddress)) {
+        if (!OpenGL::GLES::Load(GetGLProcAddress)) {
             LOG_ERROR(Render_OpenGL, "Failed to load OpenGL entry points from Mesa");
         }
     });
@@ -351,6 +352,163 @@ void Context::SwapBuffers() {
 
     const auto& layout = window.GetFramebufferLayout();
     ResizeSurface(layout.width, layout.height);
+}
+
+namespace {
+
+EGLDisplay es_display{EGL_NO_DISPLAY};
+EGLConfig es_config{};
+std::once_flag es_init_flag;
+bool es_ready = false;
+
+void* GetEsProcAddress(const char* name) {
+    return reinterpret_cast<void*>(eglGetProcAddress(name));
+}
+
+bool InitializeEs() {
+    es_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    EGLint major{};
+    EGLint minor{};
+    if (es_display == EGL_NO_DISPLAY || !eglInitialize(es_display, &major, &minor)) {
+        LOG_ERROR(Render_OpenGL, "System EGL failed to initialize: 0x{:x}", eglGetError());
+        return false;
+    }
+    if (!eglBindAPI(EGL_OPENGL_ES_API)) {
+        return false;
+    }
+    static constexpr EGLint config_attribs[]{
+        EGL_SURFACE_TYPE,
+        EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE,
+        EGL_OPENGL_ES3_BIT,
+        EGL_RED_SIZE,
+        8,
+        EGL_GREEN_SIZE,
+        8,
+        EGL_BLUE_SIZE,
+        8,
+        EGL_ALPHA_SIZE,
+        8,
+        EGL_NONE,
+    };
+    EGLint count{};
+    if (!eglChooseConfig(es_display, config_attribs, &es_config, 1, &count) || count == 0) {
+        LOG_ERROR(Render_OpenGL, "System EGL has no RGBA8 OpenGL ES 3 window config");
+        return false;
+    }
+    LOG_INFO(Render_OpenGL, "System EGL {}.{}: {}", major, minor,
+             eglQueryString(es_display, EGL_VENDOR));
+    return true;
+}
+
+} // Anonymous namespace
+
+EsContext::EsContext(const Core::Frontend::EmuWindow& window_, void* share_context,
+                     bool presenter_)
+    : window{window_}, presenter{presenter_} {
+    std::call_once(es_init_flag, [] { es_ready = InitializeEs(); });
+    if (!es_ready) {
+        return;
+    }
+    static constexpr EGLint context_attribs[]{
+        EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 2, EGL_NONE,
+    };
+    context = eglCreateContext(es_display, es_config,
+                               share_context ? share_context : EGL_NO_CONTEXT, context_attribs);
+    if (context == EGL_NO_CONTEXT) {
+        LOG_ERROR(Render_OpenGL, "Failed to create an OpenGL ES 3.2 context: 0x{:x}",
+                  eglGetError());
+        context = nullptr;
+        return;
+    }
+    if (!presenter) {
+        // Workers need a surface to be current on drivers without surfaceless contexts.
+        static constexpr EGLint pbuffer_attribs[]{EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+        surface = eglCreatePbufferSurface(es_display, es_config, pbuffer_attribs);
+    }
+}
+
+EsContext::~EsContext() {
+    if (!context) {
+        return;
+    }
+    DoneCurrent();
+    if (surface) {
+        eglDestroySurface(es_display, surface);
+    }
+    eglDestroyContext(es_display, context);
+    if (surface_window) {
+        ANativeWindow_release(surface_window);
+    }
+}
+
+bool EsContext::BindWindowSurface() {
+    auto* const target = static_cast<ANativeWindow*>(window.GetWindowInfo().render_surface);
+    if (target == surface_window && surface) {
+        return true;
+    }
+    if (surface) {
+        eglMakeCurrent(es_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(es_display, surface);
+        surface = nullptr;
+        is_current = false;
+    }
+    if (surface_window) {
+        ANativeWindow_release(surface_window);
+        surface_window = nullptr;
+    }
+    if (!target) {
+        return false;
+    }
+    ANativeWindow_acquire(target);
+    surface_window = target;
+    surface = eglCreateWindowSurface(es_display, es_config, target, nullptr);
+    if (surface == EGL_NO_SURFACE) {
+        LOG_ERROR(Render_OpenGL, "Failed to create the window surface: 0x{:x}", eglGetError());
+        surface = nullptr;
+        return false;
+    }
+    return true;
+}
+
+void EsContext::MakeCurrent() {
+    if (!context || is_current) {
+        return;
+    }
+    if (presenter && !BindWindowSurface()) {
+        return;
+    }
+    const EGLSurface draw = surface ? surface : EGL_NO_SURFACE;
+    is_current = eglMakeCurrent(es_display, draw, draw, context) == EGL_TRUE;
+    if (!is_current) {
+        LOG_ERROR(Render_OpenGL, "eglMakeCurrent failed: 0x{:x}", eglGetError());
+        return;
+    }
+    static std::once_flag load_flag;
+    std::call_once(load_flag, [] {
+        if (!OpenGL::GLES::Load(GetEsProcAddress)) {
+            LOG_ERROR(Render_OpenGL, "Failed to load OpenGL ES entry points");
+        }
+    });
+}
+
+void EsContext::DoneCurrent() {
+    if (!is_current) {
+        return;
+    }
+    eglMakeCurrent(es_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    is_current = false;
+}
+
+void EsContext::SwapBuffers() {
+    if (!presenter || !is_current) {
+        return;
+    }
+    if (!eglSwapBuffers(es_display, surface)) {
+        // The window went away or was replaced (rotation, app switch): attach to the new one.
+        is_current = false;
+        MakeCurrent();
+    }
 }
 
 } // namespace AndroidGL

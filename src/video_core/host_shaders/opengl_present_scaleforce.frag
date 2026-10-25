@@ -90,7 +90,7 @@ vec4 Scaleforce(sampler2D tex, vec2 tex_coord) {
         // This is because the texels all around are different and total_offset reaches into clear areas.
         // This works pretty well to keep the offset in bounds for these cases.
         lfloat clamp_val = length(total_offset) / total_dist;
-        vec2 final_offset = vec2(clamp(total_offset, -clamp_val, clamp_val)) / textureSize(tex, 0);
+        vec2 final_offset = vec2(clamp(total_offset, -clamp_val, clamp_val)) / vec2(textureSize(tex, 0));
 
         return texture(tex, tex_coord - final_offset);
     }

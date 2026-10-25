@@ -69,6 +69,8 @@ struct Profile {
     bool warp_size_potentially_larger_than_guest{};
 
     bool lower_left_origin_mode{};
+    /// Emit GLSL ES 3.20 instead of desktop GLSL 4.60.
+    bool glsl_es{};
     /// Fragment outputs have to be declared even if they are not written to avoid undefined values.
     /// See Ori and the Blind Forest's main menu for reference.
     bool need_declared_frag_colors{};

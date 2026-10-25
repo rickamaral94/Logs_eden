@@ -64,8 +64,8 @@ vec4 AreaSampling(sampler2D textureSampler, vec2 texCoords, vec2 source_size, ve
     avg_color += area_se * texelFetch(textureSampler, ivec2(f_end.x, f_end.y), 0);
 
     // Determine the size of the pixel box.
-    int x_range = int(f_end.x - f_beg.x - 0.5);
-    int y_range = int(f_end.y - f_beg.y - 0.5);
+    int x_range = int(float(f_end.x - f_beg.x) - 0.5);
+    int y_range = int(float(f_end.y - f_beg.y) - 0.5);
 
     // Accumulate top and bottom edge pixels.
     for (int x = f_beg.x + 1; x <= f_beg.x + x_range; ++x) {
@@ -93,14 +93,14 @@ vec4 AreaSampling(sampler2D textureSampler, vec2 texCoords, vec2 source_size, ve
 }
 
 void main() {
-    vec2 source_image_size = textureSize(color_texture, 0);
+    vec2 source_image_size = vec2(textureSize(color_texture, 0));
     vec2 window_size;
 
     #ifdef VULKAN
     window_size.x = vertices[1].position.x - vertices[0].position.x;
     window_size.y = vertices[2].position.y - vertices[0].position.y;
     #else // OpenGL
-    window_size = screen_size;
+    window_size = vec2(screen_size);
     #endif
 
     color = AreaSampling(color_texture, frag_tex_coord, source_image_size, window_size);

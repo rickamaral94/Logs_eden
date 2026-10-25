@@ -453,6 +453,11 @@ void EmitSR_WScaleFactorZ(EmitContext& ctx, IR::Inst& inst) {
 }
 
 void EmitYDirection(EmitContext& ctx, IR::Inst& inst) {
+    if (ctx.profile.glsl_es) {
+        // TODO(GLES): pass the Y direction as a uniform; ES has no gl_FrontMaterial.
+        ctx.AddF32("{}=1.0;", inst);
+        return;
+    }
     ctx.uses_y_direction = true;
     ctx.AddF32("{}=gl_FrontMaterial.ambient.a;", inst);
 }

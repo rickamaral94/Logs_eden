@@ -57,7 +57,7 @@ vec3 FxaaPixelShader(vec4 posPos, sampler2D tex) {
     float rcpDirMin = 1.0/(min(abs(dir.x), abs(dir.y)) + dirReduce);
     dir = min(vec2( FXAA_SPAN_MAX,  FXAA_SPAN_MAX),
           max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),
-          dir * rcpDirMin)) / textureSize(tex, 0);
+          dir * rcpDirMin)) / vec2(textureSize(tex, 0));
 /*--------------------------------------------------------*/
     vec3 rgbA = (1.0 / 2.0) * (
         FxaaTexLod0(tex, posPos.xy + dir * (1.0 / 3.0 - 0.5)).xyz +

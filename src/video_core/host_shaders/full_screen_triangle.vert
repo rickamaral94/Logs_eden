@@ -8,12 +8,12 @@
 #define BEGIN_PUSH_CONSTANTS layout(push_constant) uniform PushConstants {
 #define END_PUSH_CONSTANTS };
 #define UNIFORM(n)
-#define FLIPY 1
+#define FLIPY 1.0
 #else // ^^^ Vulkan ^^^ // vvv OpenGL vvv
 #define VERTEX_ID gl_VertexID
 #define BEGIN_PUSH_CONSTANTS
 #define END_PUSH_CONSTANTS
-#define FLIPY -1
+#define FLIPY -1.0
 #define UNIFORM(n) layout (location = n) uniform
 out gl_PerVertex {
     vec4 gl_Position;

@@ -103,6 +103,16 @@
         <item>2</item>
     </integer-array>
 
+    <string-array name="openglDriverNames">
+        <item>@string/opengl_driver_mesa_zink</item>
+        <item>@string/opengl_driver_system_gles</item>
+    </string-array>
+
+    <integer-array name="openglDriverValues">
+        <item>0</item>
+        <item>1</item>
+    </integer-array>
+
     <string-array name="rendererAccuracyNames">
         <item>@string/renderer_accuracy_low</item>
         <item>@string/renderer_accuracy_high</item>

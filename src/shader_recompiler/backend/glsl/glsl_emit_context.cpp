@@ -21,14 +21,27 @@ char Swizzle(size_t offset) {
     return "xyzw"[CbufIndex(offset)];
 }
 
-std::string_view InterpDecorator(Interpolation interp) {
+// GLSL ES has every type below; only float and int have a default precision in all stages.
+constexpr std::string_view ES_PRECISION{
+    "precision highp float;precision highp int;"
+    "precision highp sampler2D;precision highp sampler3D;precision highp samplerCube;"
+    "precision highp sampler2DArray;precision highp samplerCubeArray;"
+    "precision highp sampler2DShadow;precision highp sampler2DArrayShadow;"
+    "precision highp samplerCubeShadow;precision highp samplerCubeArrayShadow;"
+    "precision highp samplerBuffer;precision highp sampler2DMS;precision highp sampler2DMSArray;"
+    "precision highp isampler2D;precision highp usampler2D;"
+    "precision highp uimage2D;precision highp uimage2DArray;precision highp uimage3D;"
+    "precision highp uimageCube;precision highp uimageCubeArray;precision highp uimageBuffer;\n"};
+
+std::string_view InterpDecorator(Interpolation interp, bool es) {
     switch (interp) {
     case Interpolation::Smooth:
         return "";
     case Interpolation::Flat:
         return "flat ";
     case Interpolation::NoPerspective:
-        return "noperspective ";
+        // GLSL ES has no noperspective without GL_NV_shader_noperspective_interpolation.
+        return es ? "" : "noperspective ";
     }
     throw InvalidArgument("Invalid interpolation {}", interp);
 }
@@ -336,7 +349,7 @@ EmitContext::EmitContext(IR::Program& program, Bindings& bindings, const Profile
         const auto qualifier{uses_geometry_passthrough ? "passthrough"
                                                        : fmt::format("location={}", index)};
         header += fmt::format("layout({}){}in vec4 in_attr{}{};", qualifier,
-                              InterpDecorator(info.interpolation[index]), index,
+                              InterpDecorator(info.interpolation[index], profile.glsl_es), index,
                               InputArrayDecorator(stage));
     }
     for (size_t index = 0; index < info.uses_patches.size(); ++index) {
@@ -375,7 +388,11 @@ EmitContext::EmitContext(IR::Program& program, Bindings& bindings, const Profile
 }
 
 void EmitContext::SetupExtensions() {
-    header += "#extension GL_ARB_separate_shader_objects : enable\n";
+    if (!profile.glsl_es) {
+        header += "#extension GL_ARB_separate_shader_objects : enable\n";
+    } else if (info.stores.ClipDistances()) {
+        header += "#extension GL_EXT_clip_cull_distance : enable\n";
+    }
     if (info.uses_shadow_lod && profile.support_gl_texture_shadow_lod) {
         header += "#extension GL_EXT_texture_shadow_lod : enable\n";
     }
@@ -428,6 +445,9 @@ void EmitContext::SetupExtensions() {
     }
     if (uses_geometry_passthrough) {
         header += "#extension GL_NV_geometry_shader_passthrough : enable\n";
+    }
+    if (profile.glsl_es) {
+        header += ES_PRECISION;
     }
 }
 

@@ -1520,6 +1520,7 @@ class SettingsFragmentPresenter(
             add(HeaderSetting(R.string.gpu))
 
             add(IntSetting.RENDERER_BACKEND.key)
+            add(IntSetting.OPENGL_DRIVER.key)
             add(BooleanSetting.RENDERER_DEBUG.key)
             add(BooleanSetting.RENDERER_PATCH_OLD_QCOM_DRIVERS.key)
             add(BooleanSetting.BUFFER_REORDER_DISABLE.key)

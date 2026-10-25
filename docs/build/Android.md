@@ -118,6 +118,24 @@ vendor and renderer in the `opengl_device` section, and host frame intervals as 
 figures that only the Vulkan renderer records (GPU timestamps, render passes, wait-for-idle,
 pipeline timers) stay empty for OpenGL sessions.
 
+### OpenGL ES driver (experimental)
+
+Settings, Debug, "OpenGL driver" also offers the system's own OpenGL ES 3.2 driver, which needs
+no Mesa and presents straight to the window (no CPU copy). It is aimed at GPUs whose Vulkan
+driver is the weak point (Mali). The renderer is written for desktop OpenGL 4.6, so on ES
+`video_core/renderer_opengl/gl_es_compat.cpp` points the desktop calls at ES extensions or
+emulates them on ES calls (direct state access through a scratch texture unit and the copy
+buffer binding, texture views, indexed viewports, multi draw with a count), the shader
+recompiler emits `#version 320 es`, and the renderer's own GLSL is rewritten when it is
+compiled (`TranslateToEs` in `gl_shader_util.cpp`).
+
+What ES cannot do is skipped and counted. A capture lists the counts in the
+`opengl_es_unsupported` sample and the driver's extensions in `opengl_device.extensions`, which
+is what to read first when a game renders wrongly. Known gaps: no polygon mode, logic ops,
+clip control, per-viewport state, transform feedback draws or base instance without the
+matching extension; no 64-bit or warp intrinsics in shaders; MSAA and BC4 helper shaders and
+the GPU ASTC decoder are not translated (ASTC is sampled natively where the driver has it).
+
 ### Additional Resources
 
 <https://developer.android.com/studio/intro>

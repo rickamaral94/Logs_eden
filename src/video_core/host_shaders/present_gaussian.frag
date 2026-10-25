@@ -47,7 +47,7 @@ vec4 blurDiagonal(sampler2D textureSampler, vec2 coord, vec2 norm) {
 
 void main() {
     vec4 base = texture(color_texture, vec2(frag_tex_coord)) * weight[0];
-    vec2 tex_offset = 1.0f / textureSize(color_texture, 0);
+    vec2 tex_offset = 1.0 / vec2(textureSize(color_texture, 0));
 
     // TODO(Blinkhawk): This code can be optimized through shader group instructions.
     vec4 horizontal = blurHorizontal(color_texture, frag_tex_coord, tex_offset);

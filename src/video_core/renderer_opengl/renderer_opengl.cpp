@@ -21,6 +21,7 @@
 #include "video_core/capture.h"
 #include "video_core/present.h"
 #include "video_core/renderer_opengl/gl_blit_screen.h"
+#include "video_core/renderer_opengl/gl_es_compat.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
 #include "video_core/renderer_opengl/gl_shader_manager.h"
 #include "video_core/renderer_opengl/gl_shader_util.h"
@@ -134,7 +135,11 @@ RendererOpenGL::RendererOpenGL(Core::Frontend::EmuWindow& emu_window_,
                           VideoCore::Capture::LinearHeight);
 }
 
-RendererOpenGL::~RendererOpenGL() = default;
+RendererOpenGL::~RendererOpenGL() {
+    if (GLES::IsActive()) {
+        Common::Diagnostics::UnregisterSampler("opengl_es_unsupported");
+    }
+}
 
 void RendererOpenGL::Composite(std::span<const Tegra::FramebufferConfig> framebuffers) {
     if (framebuffers.empty()) {
@@ -176,10 +181,16 @@ void RendererOpenGL::AddTelemetryFields() {
     LOG_INFO(Render_OpenGL, "GL_VERSION: {}", gl_version);
     LOG_INFO(Render_OpenGL, "GL_VENDOR: {}", gpu_vendor);
     LOG_INFO(Render_OpenGL, "GL_RENDERER: {}", gpu_model);
-    Common::Diagnostics::SetSection(
-        "opengl_device",
-        nlohmann::json{{"version", gl_version}, {"vendor", gpu_vendor}, {"renderer", gpu_model}}
-            .dump());
+    nlohmann::json device_json{
+        {"version", gl_version}, {"vendor", gpu_vendor}, {"renderer", gpu_model}};
+    if (GLES::IsActive()) {
+        device_json["api"] = "opengl_es";
+        device_json["extensions"] = nlohmann::json::parse(GLES::CapabilitiesJson());
+        // Operations the ES driver cannot do, counted as the game triggers them.
+        Common::Diagnostics::RegisterSampler("opengl_es_unsupported",
+                                             [] { return GLES::UnsupportedJson(); });
+    }
+    Common::Diagnostics::SetSection("opengl_device", device_json.dump());
 }
 
 void RendererOpenGL::RenderToBuffer(std::span<const Tegra::FramebufferConfig> framebuffers,

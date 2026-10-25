@@ -52,22 +52,22 @@ layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 uvec4 ReadTexel(uint offset) {
     switch (bytes_per_block) {
 #if HAS_EXTENDED_TYPES
-    case 1:
+    case 1u:
         return uvec4(u8data[offset], 0, 0, 0);
-    case 2:
-        return uvec4(u16data[offset / 2], 0, 0, 0);
+    case 2u:
+        return uvec4(u16data[offset / 2u], 0, 0, 0);
 #else
-    case 1:
-        return uvec4(bitfieldExtract(u32data[offset / 4], int((offset * 8) & 24), 8), 0, 0, 0);
-    case 2:
-        return uvec4(bitfieldExtract(u32data[offset / 4], int((offset * 8) & 16), 16), 0, 0, 0);
+    case 1u:
+        return uvec4(bitfieldExtract(u32data[offset / 4u], int((offset * 8u) & 24u), 8), 0, 0, 0);
+    case 2u:
+        return uvec4(bitfieldExtract(u32data[offset / 4u], int((offset * 8u) & 16u), 16), 0, 0, 0);
 #endif
-    case 4:
-        return uvec4(u32data[offset / 4], 0, 0, 0);
-    case 8:
-        return uvec4(u64data[offset / 8], 0, 0);
+    case 4u:
+        return uvec4(u32data[offset / 4u], 0, 0, 0);
+    case 8u:
+        return uvec4(u64data[offset / 8u], 0, 0);
     case 16:
-        return u128data[offset / 16];
+        return u128data[offset / 16u];
     }
     return uvec4(0);
 }
@@ -75,7 +75,7 @@ uvec4 ReadTexel(uint offset) {
 void main() {
     uvec2 pos = gl_GlobalInvocationID.xy + origin;
 
-    uint offset = 0;
+    uint offset = 0u;
     offset += pos.x * bytes_per_block;
     offset += pos.y * pitch;
 

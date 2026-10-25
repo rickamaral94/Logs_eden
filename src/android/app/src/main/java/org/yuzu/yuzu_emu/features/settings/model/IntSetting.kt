@@ -14,6 +14,7 @@ enum class IntSetting(override val key: String) : AbstractIntSetting {
     REGION_INDEX("region_index"),
     LANGUAGE_INDEX("language_index"),
     RENDERER_BACKEND("backend"),
+    OPENGL_DRIVER("opengl_driver"),
     RENDERER_VRAM_USAGE_MODE("vram_usage_mode"),
     RENDERER_NVDEC_EMULATION("nvdec_emulation"),
     RENDERER_ASTC_DECODE_METHOD("accelerate_astc"),

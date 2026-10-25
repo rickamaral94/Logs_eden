@@ -971,6 +971,15 @@ abstract class SettingsItem(
                 )
             )
             put(
+                SingleChoiceSetting(
+                    IntSetting.OPENGL_DRIVER,
+                    titleId = R.string.opengl_driver,
+                    descriptionId = R.string.opengl_driver_description,
+                    choicesId = R.array.openglDriverNames,
+                    valuesId = R.array.openglDriverValues
+                )
+            )
+            put(
                 SwitchSetting(
                     BooleanSetting.ENABLE_UPDATE_CHECKS,
                     titleId = R.string.enable_update_checks,

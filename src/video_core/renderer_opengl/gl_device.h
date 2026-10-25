@@ -187,6 +187,11 @@ public:
         return strict_context_required;
     }
 
+    /// The context is OpenGL ES 3.2, with desktop calls emulated (see gl_es_compat.h).
+    bool IsGLES() const {
+        return is_gles;
+    }
+
     bool SupportsConditionalBarriers() const {
         return supports_conditional_barriers;
     }
@@ -199,6 +204,7 @@ private:
     static bool TestVariableAoffi();
     static bool TestPreciseBug();
 
+    bool is_gles{};
     std::array<u32, Shader::MaxStageTypes> max_uniform_buffers{};
     size_t uniform_buffer_alignment{};
     size_t shader_storage_alignment{};

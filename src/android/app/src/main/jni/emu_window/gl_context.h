@@ -69,4 +69,31 @@ private:
     size_t pack_index{};
 };
 
+/// OpenGL ES 3.2 through the system's EGL: the presenting context renders into a window
+/// surface and swaps it directly, no copy. The desktop renderer runs on it through the
+/// emulation in video_core/renderer_opengl/gl_es_compat.h.
+class EsContext final : public Core::Frontend::GraphicsContext {
+public:
+    EsContext(const Core::Frontend::EmuWindow& window, void* share_context, bool presenter);
+    ~EsContext() override;
+
+    void SwapBuffers() override;
+    void MakeCurrent() override;
+    void DoneCurrent() override;
+
+    [[nodiscard]] void* Handle() const {
+        return context;
+    }
+
+private:
+    bool BindWindowSurface();
+
+    const Core::Frontend::EmuWindow& window;
+    void* context{};
+    void* surface{};
+    ANativeWindow* surface_window{};
+    bool presenter{};
+    bool is_current{};
+};
+
 } // namespace AndroidGL

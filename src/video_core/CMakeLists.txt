@@ -376,6 +376,8 @@ if (ENABLE_OPENGL)
         renderer_opengl/gl_compute_pipeline.h
         renderer_opengl/gl_device.cpp
         renderer_opengl/gl_device.h
+        renderer_opengl/gl_es_compat.cpp
+        renderer_opengl/gl_es_compat.h
         renderer_opengl/gl_fence_manager.cpp
         renderer_opengl/gl_fence_manager.h
         renderer_opengl/gl_graphics_pipeline.cpp

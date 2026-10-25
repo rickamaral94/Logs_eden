@@ -829,8 +829,12 @@
     <string name="memory_petabyte">PB</string>
     <string name="memory_exabyte">EB</string>
 
-    <string name="renderer_api_description">OpenGL usa o renderizador OpenGL de desktop pelo Zink do Mesa, sobre o driver Vulkan, para testes de compatibilidade e comparação com o Vulkan. É mais lento: cada quadro é copiado para a tela pela CPU.</string>
+    <string name="renderer_api_description">OpenGL usa o renderizador OpenGL, para testes de compatibilidade e comparação com o Vulkan. Escolha o driver dele abaixo.</string>
     <string name="renderer_none">Nenhum</string>
+    <string name="opengl_driver">Driver OpenGL</string>
+    <string name="opengl_driver_description">Mesa Zink roda OpenGL 4.6 de desktop sobre o driver Vulkan. OpenGL ES do sistema usa o driver OpenGL ES 3.2 do próprio celular (útil em GPUs Mali); esse caminho é experimental e muitos jogos ainda não renderizam corretamente.</string>
+    <string name="opengl_driver_mesa_zink">Mesa Zink (OpenGL 4.6)</string>
+    <string name="opengl_driver_system_gles">OpenGL ES 3.2 do sistema (experimental)</string>
 
     <string name="renderer_accuracy_high">Alta</string>
 

@@ -9632,6 +9632,29 @@ static void find_coreGL(void) {
 	}
 }
 
+void gladLoadGLAllCoreLoader(GLADloadproc load) {
+	int* const versions[] = {&GLAD_GL_VERSION_3_3, &GLAD_GL_VERSION_4_0, &GLAD_GL_VERSION_4_1,
+		&GLAD_GL_VERSION_4_2, &GLAD_GL_VERSION_4_3, &GLAD_GL_VERSION_4_4, &GLAD_GL_VERSION_4_5,
+		&GLAD_GL_VERSION_4_6};
+	int saved[sizeof(versions) / sizeof(versions[0])];
+	size_t i;
+	for (i = 0; i < sizeof(versions) / sizeof(versions[0]); ++i) {
+		saved[i] = *versions[i];
+		*versions[i] = 1;
+	}
+	load_GL_VERSION_3_3(load);
+	load_GL_VERSION_4_0(load);
+	load_GL_VERSION_4_1(load);
+	load_GL_VERSION_4_2(load);
+	load_GL_VERSION_4_3(load);
+	load_GL_VERSION_4_4(load);
+	load_GL_VERSION_4_5(load);
+	load_GL_VERSION_4_6(load);
+	for (i = 0; i < sizeof(versions) / sizeof(versions[0]); ++i) {
+		*versions[i] = saved[i];
+	}
+}
+
 int gladLoadGLLoader(GLADloadproc load) {
 	GLVersion.major = 0; GLVersion.minor = 0;
 	glGetString = (PFNGLGETSTRINGPROC)load("glGetString");

@@ -53,52 +53,52 @@ layout(binding = BINDING_OUTPUT_IMAGE) uniform writeonly uimage2DArray output_im
 
 layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 
-const uint GOB_SIZE_X = 64;
-const uint GOB_SIZE_Y = 8;
-const uint GOB_SIZE_Z = 1;
+const uint GOB_SIZE_X = 64u;
+const uint GOB_SIZE_Y = 8u;
+const uint GOB_SIZE_Z = 1u;
 const uint GOB_SIZE = GOB_SIZE_X * GOB_SIZE_Y * GOB_SIZE_Z;
 
-const uint GOB_SIZE_X_SHIFT = 6;
-const uint GOB_SIZE_Y_SHIFT = 3;
-const uint GOB_SIZE_Z_SHIFT = 0;
+const uint GOB_SIZE_X_SHIFT = 6u;
+const uint GOB_SIZE_Y_SHIFT = 3u;
+const uint GOB_SIZE_Z_SHIFT = 0u;
 const uint GOB_SIZE_SHIFT = GOB_SIZE_X_SHIFT + GOB_SIZE_Y_SHIFT + GOB_SIZE_Z_SHIFT;
 
-const uvec2 SWIZZLE_MASK = uvec2(GOB_SIZE_X - 1, GOB_SIZE_Y - 1);
+const uvec2 SWIZZLE_MASK = uvec2(GOB_SIZE_X - 1u, GOB_SIZE_Y - 1u);
 
 uint SwizzleTable(uint pos) {
     const uint t[8] = uint[](
-        0x12100200, 0x13110301, 0x16140604, 0x17150705,
-        0x1a180a08, 0x1b190b09, 0x1e1c0e0c, 0x1f1d0f0d
+        0x12100200u, 0x13110301u, 0x16140604u, 0x17150705u,
+        0x1a180a08u, 0x1b190b09u, 0x1e1c0e0cu, 0x1f1d0f0du
     );
-    const uint i = pos >> 4;
-    const uint h = (t[i / 4] >> ((i % 4) * 8)) & 0xff;
-    return (h << 4) | (pos & 0xf);
+    const uint i = pos >> 4u;
+    const uint h = (t[i / 4u] >> ((i % 4u) * 8u)) & 0xffu;
+    return (h << 4u) | (pos & 0xfu);
 }
 
 uint SwizzleOffset(uvec2 pos) {
     pos = pos & SWIZZLE_MASK;
-    return SwizzleTable(pos.y * 64 + pos.x);
+    return SwizzleTable(pos.y * 64u + pos.x);
 }
 
 uvec4 ReadTexel(uint offset) {
     switch (bytes_per_block_log2) {
 #if HAS_EXTENDED_TYPES
-    case 0:
+    case 0u:
         return uvec4(u8data[offset], 0, 0, 0);
-    case 1:
-        return uvec4(u16data[offset / 2], 0, 0, 0);
+    case 1u:
+        return uvec4(u16data[offset / 2u], 0, 0, 0);
 #else
-    case 0:
-        return uvec4(bitfieldExtract(u32data[offset / 4], int((offset * 8) & 24), 8), 0, 0, 0);
-    case 1:
-        return uvec4(bitfieldExtract(u32data[offset / 4], int((offset * 8) & 16), 16), 0, 0, 0);
+    case 0u:
+        return uvec4(bitfieldExtract(u32data[offset / 4u], int((offset * 8u) & 24u), 8), 0, 0, 0);
+    case 1u:
+        return uvec4(bitfieldExtract(u32data[offset / 4u], int((offset * 8u) & 16u), 16), 0, 0, 0);
 #endif
-    case 2:
-        return uvec4(u32data[offset / 4], 0, 0, 0);
-    case 3:
-        return uvec4(u64data[offset / 8], 0, 0);
-    case 4:
-        return u128data[offset / 16];
+    case 2u:
+        return uvec4(u32data[offset / 4u], 0, 0, 0);
+    case 3u:
+        return uvec4(u64data[offset / 8u], 0, 0);
+    case 4u:
+        return u128data[offset / 16u];
     }
     return uvec4(0);
 }
@@ -112,7 +112,7 @@ void main() {
 
     const uint block_y = pos.y >> GOB_SIZE_Y_SHIFT;
 
-    uint offset = 0;
+    uint offset = 0u;
     offset += pos.z * layer_stride;
     offset += (block_y >> block_height) * block_size;
     offset += (block_y & block_height_mask) << GOB_SIZE_SHIFT;

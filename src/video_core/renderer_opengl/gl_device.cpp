@@ -21,6 +21,7 @@
 #include "common/settings.h"
 #include "shader_recompiler/stage.h"
 #include "video_core/renderer_opengl/gl_device.h"
+#include "video_core/renderer_opengl/gl_es_compat.h"
 #include "video_core/renderer_opengl/gl_resource_manager.h"
 
 using namespace Common::Literals;
@@ -159,8 +160,8 @@ static bool HasSlowSoftwareAstc(std::string_view vendor_name, std::string_view r
 }
 } // Anonymous namespace
 
-Device::Device(Core::Frontend::EmuWindow& emu_window) {
-    if (!GLAD_GL_VERSION_4_6) {
+Device::Device(Core::Frontend::EmuWindow& emu_window) : is_gles{GLES::IsActive()} {
+    if (!is_gles && !GLAD_GL_VERSION_4_6) {
         LOG_ERROR(Render_OpenGL, "OpenGL 4.6 is not available");
         throw std::runtime_error{"Insufficient version"};
     }
@@ -203,17 +204,22 @@ Device::Device(Core::Frontend::EmuWindow& emu_window) {
     max_varyings = GetInteger<u32>(GL_MAX_VARYING_VECTORS);
     max_compute_shared_memory_size = GetInteger<u32>(GL_MAX_COMPUTE_SHARED_MEMORY_SIZE);
     max_glasm_storage_buffer_blocks = GetInteger<u32>(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS);
-    max_user_clip_distances = GetInteger<u32>(GL_MAX_CLIP_DISTANCES);
+    max_user_clip_distances =
+        !is_gles || HasExtension(extensions, "GL_EXT_clip_cull_distance")
+            ? GetInteger<u32>(GL_MAX_CLIP_DISTANCES)
+            : 0;
     has_warp_intrinsics = GLAD_GL_NV_gpu_shader5 && GLAD_GL_NV_shader_thread_group &&
                           GLAD_GL_NV_shader_thread_shuffle;
     has_shader_ballot = GLAD_GL_ARB_shader_ballot;
     has_vertex_viewport_layer = GLAD_GL_ARB_shader_viewport_layer_array;
     has_image_load_formatted = HasExtension(extensions, "GL_EXT_shader_image_load_formatted");
     has_texture_shadow_lod = HasExtension(extensions, "GL_EXT_texture_shadow_lod");
-    has_astc = !has_slow_software_astc && IsASTCSupported();
-    has_variable_aoffi = TestVariableAoffi();
+    // The probes below compile desktop GLSL or query desktop-only format properties.
+    has_astc = is_gles ? HasExtension(extensions, "GL_KHR_texture_compression_astc_ldr")
+                       : !has_slow_software_astc && IsASTCSupported();
+    has_variable_aoffi = !is_gles && TestVariableAoffi();
     has_component_indexing_bug = false;
-    has_precise_bug = TestPreciseBug();
+    has_precise_bug = !is_gles && TestPreciseBug();
     has_broken_texture_view_formats = (!is_linux && is_intel);
     has_nv_viewport_array2 = GLAD_GL_NV_viewport_array2;
     has_derivative_control = GLAD_GL_ARB_derivative_control;
@@ -235,7 +241,7 @@ Device::Device(Core::Frontend::EmuWindow& emu_window) {
     has_fast_buffer_sub_data = is_nvidia && !disable_fast_buffer_sub_data;
 
     auto const shader_backend = Settings::values.renderer_backend.GetValue();
-    use_assembly_shaders = shader_backend == Settings::RendererBackend::OpenGL_GLASM
+    use_assembly_shaders = !is_gles && shader_backend == Settings::RendererBackend::OpenGL_GLASM
         && GLAD_GL_NV_gpu_program5 && GLAD_GL_NV_compute_program5
         && GLAD_GL_NV_transform_feedback && GLAD_GL_NV_transform_feedback2;
     if (shader_backend == Settings::RendererBackend::OpenGL_GLASM && !use_assembly_shaders) {
@@ -261,6 +267,9 @@ Device::Device(Core::Frontend::EmuWindow& emu_window) {
     use_driver_cache = is_nvidia;
     supports_conditional_barriers = !is_intel;
 
+    if (is_gles) {
+        LOG_INFO(Render_OpenGL, "OpenGL ES device: {} {}", vendor_name, renderer);
+    }
     LOG_INFO(Render_OpenGL, "Renderer_VariableAOFFI: {}", has_variable_aoffi);
     LOG_INFO(Render_OpenGL, "Renderer_ComponentIndexingBug: {}", has_component_indexing_bug);
     LOG_INFO(Render_OpenGL, "Renderer_PreciseBug: {}", has_precise_bug);
