@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include "common/algorithm.h"
 #include "common/assert.h"
 #include "common/logging.h"
@@ -97,12 +98,21 @@ void MaxwellDMA::Launch() {
         if (regs.launch_dma.remap_enable != 0 && is_const_a_dst) {
             const u32 component_size = regs.remap_const.component_size_minus_one + 1;
             ASSERT(component_size == 1 || component_size == 2 || component_size == 4);
+            const size_t size_bytes = static_cast<size_t>(regs.line_length_in) * component_size;
+            const u32 value = regs.remap_const.remap_consta_value;
+            read_buffer.resize_destructive(size_bytes);
             if (component_size == 4) {
-                accelerate.BufferClear(regs.offset_out, regs.line_length_in, regs.remap_const.remap_consta_value);
+                accelerate.BufferClear(regs.offset_out, regs.line_length_in, value);
+                std::ranges::fill(std::span<u32>(reinterpret_cast<u32*>(read_buffer.data()), regs.line_length_in), value);
+                memory_manager.WriteBlockUnsafe(regs.offset_out, read_buffer.data(), size_bytes);
+            } else {
+                // Each component holds the low bytes of the constant, repeated per component.
+                for (size_t offset = 0; offset < size_bytes; offset += component_size) {
+                    std::memcpy(read_buffer.data() + offset, &value, component_size);
+                }
+                // Not cleared on the host buffer cache: write through so cached copies follow.
+                memory_manager.WriteBlock(regs.offset_out, read_buffer.data(), size_bytes);
             }
-            read_buffer.resize_destructive(regs.line_length_in * sizeof(u32));
-            std::ranges::fill(std::span<u32>(reinterpret_cast<u32*>(read_buffer.data()), regs.line_length_in), regs.remap_const.remap_consta_value);
-            memory_manager.WriteBlockUnsafe(regs.offset_out, reinterpret_cast<u8*>(read_buffer.data()), static_cast<size_t>(regs.line_length_in) * component_size);
         } else {
             memory_manager.FlushCaching();
             const auto convert_linear_2_blocklinear_addr = [](u64 address) {

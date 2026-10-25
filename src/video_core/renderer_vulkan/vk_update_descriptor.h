@@ -6,8 +6,10 @@
 
 #pragma once
 
+#include <memory>
+#include <new>
+#include <type_traits>
 #include <variant>
-#include <vector>
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace Vulkan {
@@ -33,6 +35,8 @@ union DescriptorUpdateEntry {
     VkBufferView texel_buffer;
     DescriptorAddress address;
 };
+// The payload ring is raw storage reused without destructor calls.
+static_assert(std::is_trivially_destructible_v<DescriptorUpdateEntry>);
 
 class UpdateDescriptorQueue final {
     // This should be plenty for the vast majority of cases. Most desktop platforms only
@@ -60,27 +64,27 @@ public:
     }
 
     void AddSampledImage(VkImageView image_view, VkSampler sampler) {
-        *(payload_cursor++) = VkDescriptorImageInfo{
+        std::construct_at(payload_cursor++, VkDescriptorImageInfo{
             .sampler = sampler,
             .imageView = image_view,
             .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
-        };
+        });
     }
 
     void AddImage(VkImageView image_view) {
-        *(payload_cursor++) = VkDescriptorImageInfo{
+        std::construct_at(payload_cursor++, VkDescriptorImageInfo{
             .sampler = VK_NULL_HANDLE,
             .imageView = image_view,
             .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
-        };
+        });
     }
 
     void AddBuffer(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size) {
-        *(payload_cursor++) = VkDescriptorBufferInfo{
+        std::construct_at(payload_cursor++, VkDescriptorBufferInfo{
             .buffer = buffer,
             .offset = offset,
             .range = size,
-        };
+        });
     }
 
     void AddBuffer(VkBuffer buffer, VkDeviceAddress base_address, VkDeviceSize offset,
@@ -89,15 +93,15 @@ public:
             AddBuffer(buffer, offset, size);
             return;
         }
-        *(payload_cursor++) = DescriptorAddress{
+        std::construct_at(payload_cursor++, DescriptorAddress{
             .address = base_address == 0 ? 0 : base_address + offset,
             .range = base_address == 0 ? VK_WHOLE_SIZE : size,
             .format = VK_FORMAT_UNDEFINED,
-        };
+        });
     }
 
     void AddTexelBuffer(VkBufferView texel_buffer) {
-        *(payload_cursor++) = texel_buffer;
+        std::construct_at(payload_cursor++, texel_buffer);
     }
 
     void AddTexelBuffer(VkBufferView texel_buffer, VkDeviceAddress base_address,
@@ -106,11 +110,11 @@ public:
             AddTexelBuffer(texel_buffer);
             return;
         }
-        *(payload_cursor++) = DescriptorAddress{
+        std::construct_at(payload_cursor++, DescriptorAddress{
             .address = base_address == 0 ? 0 : base_address + offset,
             .range = base_address == 0 ? VK_WHOLE_SIZE : size,
             .format = format,
-        };
+        });
     }
 
 private:
@@ -122,7 +126,14 @@ private:
     DescriptorUpdateEntry* payload_cursor = nullptr;
     DescriptorUpdateEntry* payload_start = nullptr;
     const DescriptorUpdateEntry* upload_start = nullptr;
-    std::vector<DescriptorUpdateEntry> payload;
+    // Raw storage: entries are constructed as they are written, so untouched pages of this
+    // ring (up to 96 MiB for guest descriptors) are never committed.
+    struct PayloadDeleter {
+        void operator()(DescriptorUpdateEntry* data) const noexcept {
+            ::operator delete[](data);
+        }
+    };
+    std::unique_ptr<DescriptorUpdateEntry[], PayloadDeleter> payload;
 };
 
 // TODO: should these be separate classes instead?

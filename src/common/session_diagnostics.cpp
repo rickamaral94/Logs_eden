@@ -775,10 +775,7 @@ Stage GetStage() noexcept {
     return GetState().stage.load(std::memory_order_relaxed);
 }
 
-void AddTiming(Timer timer, std::chrono::nanoseconds duration) noexcept {
-    if (!IsCapturing()) {
-        return;
-    }
+void Detail::AddTimingSlow(Timer timer, std::chrono::nanoseconds duration) noexcept {
     auto& state = GetState();
     const auto ns =
         static_cast<u64>((std::max)(duration, std::chrono::nanoseconds::zero()).count());
@@ -786,10 +783,7 @@ void AddTiming(Timer timer, std::chrono::nanoseconds duration) noexcept {
     state.session_timers[static_cast<size_t>(timer)].Add(ns);
 }
 
-void Increment(Counter counter, u64 amount) noexcept {
-    if (!IsCapturing()) {
-        return;
-    }
+void Detail::IncrementSlow(Counter counter, u64 amount) noexcept {
     auto& state = GetState();
     state.window_counters[static_cast<size_t>(counter)].fetch_add(amount,
                                                                   std::memory_order_relaxed);

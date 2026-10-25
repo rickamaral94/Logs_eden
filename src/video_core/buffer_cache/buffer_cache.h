@@ -267,12 +267,12 @@ bool BufferCache<P>::DMAClear(GPUVAddr dst_address, u64 amount, u32 value) {
     if (!cpu_dst_address) {
         return false;
     }
-    const bool dest_dirty = IsRegionRegistered(*cpu_dst_address, amount);
+    const size_t size = amount * sizeof(u32);
+    const bool dest_dirty = IsRegionRegistered(*cpu_dst_address, size);
     if (!dest_dirty) {
         return false;
     }
 
-    const size_t size = amount * sizeof(u32);
     ClearDownload(*cpu_dst_address, size);
     gpu_modified_ranges.Subtract(*cpu_dst_address, size);
 
@@ -331,7 +331,8 @@ void BufferCache<P>::BindGraphicsUniformBuffer(size_t stage, u32 index, GPUVAddr
                                                u32 size) {
     const std::optional<DAddr> device_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
     const Binding binding{
-        .device_addr = *device_addr,
+        // Unmapped: address 0 resolves to the null buffer.
+        .device_addr = device_addr.value_or(0),
         .size = size,
         .buffer_id = BufferId{},
     };
@@ -1323,7 +1324,8 @@ void BufferCache<P>::UpdateIndexBuffer() {
             inline_buffer_id = CreateBuffer(0, buffer_size, false);
         }
         if (slot_buffers[inline_buffer_id].SizeBytes() < buffer_size) [[unlikely]] {
-            slot_buffers.erase(inline_buffer_id);
+            // Unregistered and destroyed after the GPU is done with it, like any buffer.
+            DeleteBuffer(inline_buffer_id, true);
             inline_buffer_id = CreateBuffer(0, buffer_size, false);
         }
         channel_state->index_buffer = Binding{
@@ -1766,7 +1768,11 @@ bool BufferCache<P>::SynchronizeBuffer(Buffer& buffer, DAddr device_addr, u32 si
     }
     const std::span<BufferCopy> copies_span(upload_copies.data(), upload_copies.size());
     UploadMemory(buffer, total_size_bytes, largest_copy, copies_span);
-    any_buffer_uploaded = true;
+    // Mapped uploads are copies that carry their own barriers (or run in the upload command
+    // buffer, which ends with one); only immediate uploads need the post-upload barrier.
+    if constexpr (!USE_MEMORY_MAPS_FOR_UPLOADS) {
+        any_buffer_uploaded = true;
+    }
     return false;
 }
 
@@ -1975,6 +1981,10 @@ void BufferCache<P>::DeleteBuffer(BufferId buffer_id, bool do_not_mark) {
     }
 
     Unregister(buffer_id);
+    if (buffer_id == inline_buffer_id) {
+        // Deleted by the garbage collector or resized: the next inline draw makes a new one.
+        inline_buffer_id = NULL_BUFFER_ID;
+    }
 
 #ifdef YUZU_LEGACY
     if (!do_not_mark || !immediately_free)

@@ -41,6 +41,7 @@ jobs:
             tests/common/session_diagnostics.cpp tests/common/diagnostics_gpu_timing.cpp \
             common/diagnostics_render_passes.cpp tests/common/diagnostics_render_passes.cpp \
             common/diagnostics_frame_log.cpp tests/common/diagnostics_frame_log.cpp \
+            tests/video_core/usage_tracker.cpp \
             -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_asan"
           "$RUNNER_TEMP/sd_asan"
 
@@ -52,6 +53,7 @@ jobs:
             tests/common/session_diagnostics.cpp tests/common/diagnostics_gpu_timing.cpp \
             common/diagnostics_render_passes.cpp tests/common/diagnostics_render_passes.cpp \
             common/diagnostics_frame_log.cpp tests/common/diagnostics_frame_log.cpp \
+            tests/video_core/usage_tracker.cpp \
             -lCatch2Main -lCatch2 -o "$RUNNER_TEMP/sd_tsan"
           "$RUNNER_TEMP/sd_tsan"
 

@@ -58,8 +58,10 @@ using VideoCore::Surface::SurfaceType;
 namespace {
 constexpr bool ENABLE_MSAA_TILER_RESOLVE = true;
 constexpr bool ENABLE_MSAA_RESOLVE_CONSUME = true;
-constexpr bool ENABLE_MSAA_COLOR_DISCARD = true;
-constexpr bool ENABLE_MSAA_DEPTH_STENCIL_DISCARD = true;
+// Off: a cleared MSAA pass that is later split (barrier, copy, query) would reload samples
+// that were discarded with STORE_OP_DONT_CARE, and MSAA downloads would read them.
+constexpr bool ENABLE_MSAA_COLOR_DISCARD = false;
+constexpr bool ENABLE_MSAA_DEPTH_STENCIL_DISCARD = false;
 
 [[nodiscard]] constexpr bool NeedsExplicitBorderColorFormat(VkFormat format) {
     switch (format) {
@@ -3088,6 +3090,7 @@ void Framebuffer::CreateFramebuffer(TextureCacheRuntime& runtime,
         .height = render_area.height,
         .layers = static_cast<u32>((std::max)(num_layers, 1)),
     });
+    framebuffer_layers = static_cast<u32>((std::max)(num_layers, 1));
 }
 
 void Framebuffer::MarkResolveShadowsUpToDate() const {

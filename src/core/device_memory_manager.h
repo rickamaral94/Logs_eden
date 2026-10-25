@@ -204,8 +204,26 @@ private:
         tracked_entries.GetUnchecked(page_index).cpu_backing_address = address | (asid.id << asid_start_bit);
     }
 
-    std::array<TranslationEntry, 4> t_slot{};
-    u32 cache_cursor = 0;
+    // Small per-thread cache of page translations for single-page reads. Readers run on the
+    // GPU and service threads without a lock, so each thread has its own; Map and Unmap bump
+    // the generation to drop every thread's entries.
+    struct TranslationCache {
+        const void* owner = nullptr;
+        u64 generation = 0;
+        std::array<TranslationEntry, 4> slots{};
+        u32 cursor = 0;
+    };
+    TranslationCache& ThreadTranslationCache() noexcept {
+        thread_local TranslationCache cache;
+        const u64 current = translation_generation.load(std::memory_order_acquire);
+        if (cache.owner != this || cache.generation != current) {
+            cache = TranslationCache{};
+            cache.owner = this;
+            cache.generation = current;
+        }
+        return cache;
+    }
+    std::atomic<u64> translation_generation{};
     using CounterType = u8;
     using CounterAtomicType = std::atomic_uint8_t;
     static constexpr size_t subentries = 8 / sizeof(CounterType);

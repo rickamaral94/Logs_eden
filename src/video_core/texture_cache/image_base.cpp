@@ -91,7 +91,7 @@ std::optional<SubresourceBase> ImageBase::TryFindBase(GPUVAddr other_addr) const
         const auto [layer, mip_offset] = LayerMipOffset(diff, info.layer_stride);
         const auto end = mip_level_offsets.begin() + info.resources.levels;
         const auto it = std::find(mip_level_offsets.begin(), end, static_cast<u32>(mip_offset));
-        if (layer > info.resources.layers || it == end) {
+        if (layer >= info.resources.layers || it == end) {
             return std::nullopt;
         }
         return SubresourceBase{

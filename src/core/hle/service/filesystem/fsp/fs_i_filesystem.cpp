@@ -135,7 +135,8 @@ Result IFileSystem::GetEntryType(
 }
 
 Result IFileSystem::Commit() {
-    LOG_WARNING(Service_FS, "(STUBBED) called");
+    // Called on every game save; logging is synchronous on the FS thread.
+    LOG_DEBUG(Service_FS, "(STUBBED) called");
 
     R_SUCCEED();
 }

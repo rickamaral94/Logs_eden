@@ -151,8 +151,22 @@ u64 BeginGameRun() noexcept;
 void SetStage(Stage stage) noexcept;
 [[nodiscard]] Stage GetStage() noexcept;
 
-void AddTiming(Timer timer, std::chrono::nanoseconds duration) noexcept;
-void Increment(Counter counter, u64 amount = 1) noexcept;
+namespace Detail {
+void AddTimingSlow(Timer timer, std::chrono::nanoseconds duration) noexcept;
+void IncrementSlow(Counter counter, u64 amount) noexcept;
+} // namespace Detail
+
+// Inline so the hot paths (per draw, per pass, per submit) only test a flag when idle.
+inline void AddTiming(Timer timer, std::chrono::nanoseconds duration) noexcept {
+    if (IsCapturing()) {
+        Detail::AddTimingSlow(timer, duration);
+    }
+}
+inline void Increment(Counter counter, u64 amount = 1) noexcept {
+    if (IsCapturing()) {
+        Detail::IncrementSlow(counter, amount);
+    }
+}
 void RecordFrameInterval(FrameSeries series, std::chrono::nanoseconds interval);
 
 /// Records an event in the bounded ring. Consecutive identical events are merged with a

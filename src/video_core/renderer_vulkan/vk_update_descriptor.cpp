@@ -20,10 +20,11 @@ UpdateDescriptorQueue::UpdateDescriptorQueue(const Device& device_, size_t frame
                                              bool supports_descriptor_buffer_)
     : device{device_}, frame_payload_size{frame_payload_size_},
       supports_descriptor_buffer{supports_descriptor_buffer_},
-      payload(frame_payload_size_ * FRAMES_IN_FLIGHT)
+      payload(static_cast<DescriptorUpdateEntry*>(
+          ::operator new[](frame_payload_size_ * FRAMES_IN_FLIGHT * sizeof(DescriptorUpdateEntry))))
 {
-    payload_start = payload.data();
-    payload_cursor = payload.data();
+    payload_start = payload.get();
+    payload_cursor = payload.get();
 }
 
 UpdateDescriptorQueue::~UpdateDescriptorQueue() = default;
@@ -32,7 +33,7 @@ void UpdateDescriptorQueue::TickFrame() {
     if (++frame_index >= FRAMES_IN_FLIGHT) {
         frame_index = 0;
     }
-    payload_start = payload.data() + frame_index * frame_payload_size;
+    payload_start = payload.get() + frame_index * frame_payload_size;
     payload_cursor = payload_start;
 }
 

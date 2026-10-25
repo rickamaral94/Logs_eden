@@ -244,18 +244,9 @@ void TextureCache<P>::CheckFeedbackLoop(std::span<const ImageViewInOut> views) {
         return;
     }
 
-    if (render_targets_serial == last_feedback_loop_serial &&
-        texture_bindings_serial == last_feedback_texture_serial) {
-        if (last_feedback_loop_result) {
-            runtime.BarrierFeedbackLoop();
-        }
-        return;
-    }
-
+    // Evaluated per draw: the views bound by a draw can change without the descriptor tables
+    // changing, so a result cached per table would be stale (missed or needless barriers).
     if (rt_active_mask == 0) {
-        last_feedback_loop_serial = render_targets_serial;
-        last_feedback_texture_serial = texture_bindings_serial;
-        last_feedback_loop_result = false;
         return;
     }
     const u32 depth_bit = 1u << NUM_RT;
@@ -294,9 +285,6 @@ void TextureCache<P>::CheckFeedbackLoop(std::span<const ImageViewInOut> views) {
         return false;
     }();
 
-    last_feedback_loop_serial = render_targets_serial;
-    last_feedback_texture_serial = texture_bindings_serial;
-    last_feedback_loop_result = requires_barrier;
     if (requires_barrier) {
         runtime.BarrierFeedbackLoop();
     }
@@ -340,26 +328,16 @@ void TextureCache<P>::SynchronizeDescriptors(bool compute) {
         const bool linked_tsc = kepler_compute->launch_description.linked_tsc;
         const u32 tic_limit = kepler_compute->regs.tic.limit;
         const u32 tsc_limit = linked_tsc ? tic_limit : kepler_compute->regs.tsc.limit;
-        bool bindings_changed = false;
-        if (channel_state->compute_sampler_table.Synchronize(kepler_compute->regs.tsc.Address(), tsc_limit))
-            bindings_changed = true;
-        if (channel_state->compute_image_table.Synchronize(kepler_compute->regs.tic.Address(), tic_limit))
-            bindings_changed = true;
-        if (bindings_changed) {
-            ++texture_bindings_serial;
-        }
+        // Refresh re-reads every entry; the result is not needed here.
+        (void)channel_state->compute_sampler_table.Synchronize(kepler_compute->regs.tsc.Address(), tsc_limit);
+        (void)channel_state->compute_image_table.Synchronize(kepler_compute->regs.tic.Address(), tic_limit);
     } else {
         const bool linked_tsc = maxwell3d->regs.sampler_binding == Tegra::Engines::Maxwell3D::Regs::SamplerBinding::ViaHeaderBinding;
         const u32 tic_limit = maxwell3d->regs.tex_header.limit;
         const u32 tsc_limit = linked_tsc ? tic_limit : maxwell3d->regs.tex_sampler.limit;
-        bool bindings_changed = false;
-        if (channel_state->graphics_sampler_table.Synchronize(maxwell3d->regs.tex_sampler.Address(), tsc_limit))
-            bindings_changed = true;
-        if (channel_state->graphics_image_table.Synchronize(maxwell3d->regs.tex_header.Address(), tic_limit))
-            bindings_changed = true;
-        if (bindings_changed) {
-            ++texture_bindings_serial;
-        }
+        // Refresh re-reads every entry; the result is not needed here.
+        (void)channel_state->graphics_sampler_table.Synchronize(maxwell3d->regs.tex_sampler.Address(), tsc_limit);
+        (void)channel_state->graphics_image_table.Synchronize(maxwell3d->regs.tex_header.Address(), tic_limit);
     }
 }
 
@@ -2634,8 +2612,14 @@ void TextureCache<P>::BindRenderTarget(ImageViewId* old_id, ImageViewId new_id) 
     if (new_id) {
         const ImageViewBase& old_view = slot_image_views[new_id];
         if (True(old_view.flags & ImageViewFlagBits::PreemtiveDownload)) {
-            const PendingDownload new_download{true, 0, old_view.image_id};
-            uncommitted_downloads.emplace_back(new_download);
+            // Rebinding the same target within a fence window would download it again.
+            const bool queued = std::ranges::any_of(uncommitted_downloads, [&](const PendingDownload& d) {
+                return d.is_swizzle && d.object_id == old_view.image_id;
+            });
+            if (!queued) {
+                const PendingDownload new_download{true, 0, old_view.image_id};
+                uncommitted_downloads.emplace_back(new_download);
+            }
         }
     }
     *old_id = new_id;

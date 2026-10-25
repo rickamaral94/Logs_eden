@@ -118,7 +118,7 @@ std::string SaveDataFactory::GetFullPath(ProgramId program_id, VirtualDir dir,
         !future_path.empty()) {
         // Check if this location exists, and prefer it over the old.
         if (const auto future_dir = dir->GetDirectoryRelative(future_path); future_dir != nullptr) {
-            LOG_INFO(Service_FS, "Using save at new location: {}", future_path);
+            LOG_DEBUG(Service_FS, "Using save at new location: {}", future_path);
             return future_path;
         }
     }

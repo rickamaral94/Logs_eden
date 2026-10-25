@@ -183,8 +183,10 @@ public:
 
     const bool ib_enable : 1 = true; ///< IB mode enabled
     bool dma_increment_once : 1 = false;
-    bool signal_sync : 1 = false;
-    bool synced : 1 = false;
+    bool signal_sync = false;
+    // Written by the fence callback on another thread under sync_mutex: not a bitfield, so its
+    // byte is not shared with fields the GPU thread updates without the lock.
+    bool synced = false;
 };
 
 } // namespace Tegra

@@ -356,7 +356,8 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
             free_queue.push_front(std::move(fence));
             gpu_tick.store(host_tick, std::memory_order_release);
         }
-        gpu_tick.notify_one();
+        // Several threads can wait at once (fence, GPU and present threads).
+        gpu_tick.notify_all();
     }
 }
 

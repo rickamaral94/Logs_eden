@@ -298,11 +298,17 @@ struct Memory::Impl {
         });
     }
 
+    // The span is usable directly when its first and last byte lie in the same host block.
+    [[nodiscard]] inline bool IsSingleBlock(const VAddr addr, const std::size_t size) const noexcept {
+        const VAddr last = size != 0 ? addr + size - 1 : addr;
+        return current_page_table->entries[addr >> YUZU_PAGEBITS].Block() ==
+               current_page_table->entries[last >> YUZU_PAGEBITS].Block();
+    }
     [[nodiscard]] inline const u8* GetSpan(const VAddr addr, const std::size_t size) const noexcept {
-        return (current_page_table->entries[addr >> YUZU_PAGEBITS].Block() == current_page_table->entries[(addr + size) >> YUZU_PAGEBITS].Block()) ? GetPointerSilent(addr) : nullptr;
+        return IsSingleBlock(addr, size) ? GetPointerSilent(addr) : nullptr;
     }
     [[nodiscard]] inline u8* GetSpan(const VAddr addr, const std::size_t size) noexcept {
-        return (current_page_table->entries[addr >> YUZU_PAGEBITS].Block() == current_page_table->entries[(addr + size) >> YUZU_PAGEBITS].Block()) ? GetPointerSilent(addr) : nullptr;
+        return IsSingleBlock(addr, size) ? GetPointerSilent(addr) : nullptr;
     }
 
     bool WriteBlockImpl(const Common::ProcessAddress addr, const void* buffer, const std::size_t size, bool unsafe) {
@@ -684,7 +690,15 @@ struct Memory::Impl {
         if (!gpu_device_memory) [[unlikely]] {
             gpu_device_memory = &system.Host1x().MemoryManager();
         }
-        const size_t core = system.GetCurrentHostThreadID();
+        // Threads other than the CPU cores (services, audio) have an id outside the per-core
+        // arrays; they share one extra slot under a lock.
+        const size_t id = system.GetCurrentHostThreadID();
+        const bool other_thread = id >= Core::Hardware::NUM_CPU_CORES;
+        const size_t core = other_thread ? Core::Hardware::NUM_CPU_CORES : id;
+        std::unique_lock other_lock{other_read_guard, std::defer_lock};
+        if (other_thread) [[unlikely]] {
+            other_lock.lock();
+        }
         auto& current_area = rasterizer_read_areas[core];
         gpu_device_memory->ApplyOpOnPointer(p, scratch_buffers[core], [&](DAddr address) {
             const DAddr end_address = address + size;
@@ -764,11 +778,14 @@ struct Memory::Impl {
     Tegra::MaxwellDeviceMemoryManager* gpu_device_memory{};
     Common::PageTable* current_page_table = nullptr;
 
-    std::array<VideoCore::RasterizerDownloadArea, Core::Hardware::NUM_CPU_CORES> rasterizer_read_areas{};
+    // One slot per CPU core plus one for other threads (HandleRasterizerDownload).
+    std::array<VideoCore::RasterizerDownloadArea, Core::Hardware::NUM_CPU_CORES + 1>
+        rasterizer_read_areas{};
     std::array<GPUDirtyState, Core::Hardware::NUM_CPU_CORES> rasterizer_write_areas{};
-    std::array<Common::ScratchBuffer<u32>, Core::Hardware::NUM_CPU_CORES> scratch_buffers{};
+    std::array<Common::ScratchBuffer<u32>, Core::Hardware::NUM_CPU_CORES + 1> scratch_buffers{};
     std::span<Core::GPUDirtyMemoryManager> gpu_dirty_managers;
     std::mutex sys_core_guard;
+    std::mutex other_read_guard;
 #ifdef __ANDROID__
     std::optional<Common::HeapTracker> heap_tracker;
     Common::HeapTracker* host_buffer{};

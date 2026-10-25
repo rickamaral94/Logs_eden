@@ -66,7 +66,9 @@ bool DmaPusher::Step() {
     const CommandListHeader& header = current_command;
     dma_state.dma_get = header.addr;
 
-    if (signal_sync && !synced) {
+    if (signal_sync) {
+        // The fence may already have signalled (non-delayed fences run it at once); the state
+        // is reset either way so the next sync waits for its own fence.
         std::unique_lock lk(sync_mutex);
         sync_cv.wait(lk, [this]() { return synced; });
         signal_sync = false;
@@ -96,6 +98,7 @@ bool DmaPusher::Step() {
     if (++dma_pushbuffer_subindex >= command_list_size) {
         dma_pushbuffer.pop();
         dma_pushbuffer_subindex = 0;
+        signal_sync = false;
     } else {
         signal_sync = command_list.command_lists[dma_pushbuffer_subindex].sync && Settings::values.sync_memory_operations.GetValue();
     }

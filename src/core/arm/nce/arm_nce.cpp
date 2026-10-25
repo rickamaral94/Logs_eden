@@ -174,12 +174,35 @@ bool ArmNce::HandleGuestAccessFault(GuestContext* guest_ctx, void* raw_info, voi
     return HandleFailedGuestFault(guest_ctx, raw_info, raw_context);
 }
 
+namespace {
+
+// Hands a host fault to the handler that was installed before ours. With the default action,
+// the handler is reset and the faulting instruction runs again, so the process dies with the
+// original signal (and a tombstone) instead of jumping to a null handler.
+void ForwardToPreviousHandler(const struct sigaction& previous, int sig, void* raw_info,
+                              void* raw_context) {
+    if ((previous.sa_flags & SA_SIGINFO) != 0 && previous.sa_sigaction != nullptr) {
+        previous.sa_sigaction(sig, static_cast<siginfo_t*>(raw_info), raw_context);
+        return;
+    }
+    if (previous.sa_handler == SIG_IGN) {
+        return;
+    }
+    if (previous.sa_handler == SIG_DFL || previous.sa_handler == nullptr) {
+        signal(sig, SIG_DFL);
+        return;
+    }
+    previous.sa_handler(sig);
+}
+
+} // namespace
+
 void ArmNce::HandleHostAlignmentFault(int sig, void* raw_info, void* raw_context) {
-    return g_orig_bus_action.sa_sigaction(sig, static_cast<siginfo_t*>(raw_info), raw_context);
+    ForwardToPreviousHandler(g_orig_bus_action, sig, raw_info, raw_context);
 }
 
 void ArmNce::HandleHostAccessFault(int sig, void* raw_info, void* raw_context) {
-    return g_orig_segv_action.sa_sigaction(sig, static_cast<siginfo_t*>(raw_info), raw_context);
+    ForwardToPreviousHandler(g_orig_segv_action, sig, raw_info, raw_context);
 }
 
 void ArmNce::LockThread(Kernel::KThread* thread) {
@@ -323,7 +346,7 @@ void ArmNce::Initialize() {
         alignment_fault_action.sa_sigaction =
             reinterpret_cast<HandlerType>(&ArmNce::GuestAlignmentFaultSignalHandler);
         alignment_fault_action.sa_mask = signal_mask;
-        Common::SigAction(GuestAlignmentFaultSignal, &alignment_fault_action, nullptr);
+        Common::SigAction(GuestAlignmentFaultSignal, &alignment_fault_action, &g_orig_bus_action);
 
         struct sigaction access_fault_action {};
         access_fault_action.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART;

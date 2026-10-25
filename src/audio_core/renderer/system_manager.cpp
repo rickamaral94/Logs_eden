@@ -58,11 +58,12 @@ bool SystemManager::Add(System& system_) {
         return false;
     }
     {
+        // The manager thread iterates systems under mutex1.
         std::scoped_lock l{mutex1};
         if (systems.empty())
             InitializeUnsafe();
+        systems.push_back(&system_);
     }
-    systems.push_back(&system_);
     return true;
 }
 

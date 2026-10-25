@@ -226,6 +226,11 @@ public:
                                                  u32 color_discard_mask,
                                                  bool depth_stencil_discard) const;
 
+    /// Layers of the VkFramebuffer: a render pass clear (loadOp) clears all of them.
+    [[nodiscard]] u32 NumLayers() const noexcept {
+        return framebuffer_layers;
+    }
+
     [[nodiscard]] VkExtent2D RenderArea() const noexcept {
         return render_area;
     }
@@ -286,6 +291,7 @@ private:
     VkExtent2D render_area{};
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     u32 num_color_buffers = 0;
+    u32 framebuffer_layers = 1;
     u32 num_images = 0;
     std::array<VkImage, 9> images{};
     std::array<VkImageSubresourceRange, 9> image_ranges{};
